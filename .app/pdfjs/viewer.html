@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #525659; overflow: auto; font-family: -apple-system, sans-serif; }
+  #pages { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px; }
+  .page-wrap { position: relative; }
+  .page-wrap canvas { box-shadow: 0 2px 8px rgba(0,0,0,0.3); display: block; }
+  .page-num {
+    position: absolute; bottom: 8px; right: 12px;
+    background: rgba(0,0,0,0.6); color: #ccc; font-size: 12px;
+    padding: 2px 8px; border-radius: 4px; pointer-events: none;
+  }
+  #pageIndicator {
+    position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.75); color: #e4e6ed; font-size: 13px;
+    padding: 4px 14px; border-radius: 6px; z-index: 10; pointer-events: none;
+  }
+  /* Text layer for selection */
+  .text-layer {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    overflow: hidden; opacity: 0.25; line-height: 1;
+  }
+  .text-layer span {
+    color: transparent; position: absolute; white-space: pre;
+    transform-origin: 0% 0%;
+  }
+  .text-layer ::selection { background: rgba(108,140,255,0.4); }
+  /* Highlight overlays */
+  .highlight-overlay {
+    position: absolute; background: rgba(255,220,50,0.3);
+    border-radius: 2px; pointer-events: none; mix-blend-mode: multiply;
+  }
+  .highlight-overlay.active { background: rgba(108,140,255,0.35); }
+  /* Highlight toolbar */
+  #hlToolbar {
+    display: none; position: fixed; z-index: 20;
+    background: #1a1d27; border: 1px solid #2e3140; border-radius: 8px;
+    padding: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  }
+  #hlToolbar button {
+    background: #6c8cff; color: #fff; border: none; border-radius: 6px;
+    padding: 5px 12px; font-size: 12px; cursor: pointer; font-weight: 500;
+  }
+  #hlToolbar button:hover { background: #4a6adf; }
+</style>
+</head>
+<body>
+<div id="pageIndicator"></div>
+<div id="pages"></div>
+<div id="hlToolbar"><button id="hlBtn">Highlight</button></div>
+
+<script type="module">
+  import * as pdfjsLib from './pdf.min.mjs';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs';
+
+  const params = new URLSearchParams(window.location.search);
+  const fileUrl = params.get('file');
+  if (!fileUrl) { document.body.textContent = 'No file specified'; }
+
+  let pdfDoc = null;
+  const container = document.getElementById('pages');
+  const indicator = document.getElementById('pageIndicator');
+  const toolbar = document.getElementById('hlToolbar');
+  const scale = 1.5;
+  let highlights = []; // { page, text, rects: [{x,y,w,h}] }
+
+  async function renderPage(num) {
+    const page = await pdfDoc.getPage(num);
+    const viewport = page.getViewport({ scale });
+    const wrap = document.createElement('div');
+    wrap.className = 'page-wrap';
+    wrap.id = 'page-' + num;
+    wrap.style.width = viewport.width + 'px';
+    wrap.style.height = viewport.height + 'px';
+
+    // Canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    wrap.appendChild(canvas);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+    // Text layer
+    const textContent = await page.getTextContent();
+    const textLayer = document.createElement('div');
+    textLayer.className = 'text-layer';
+    textLayer.dataset.page = num;
+    textContent.items.forEach(item => {
+      const span = document.createElement('span');
+      span.textContent = item.str;
+      const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+      const fontSize = Math.sqrt(tx[0]*tx[0] + tx[1]*tx[1]);
+      span.style.left = tx[4] + 'px';
+      span.style.top = (tx[5] - fontSize) + 'px';
+      span.style.fontSize = fontSize + 'px';
+      span.style.fontFamily = item.fontName || 'sans-serif';
+      textLayer.appendChild(span);
+    });
+    wrap.appendChild(textLayer);
+
+    // Highlight container
+    const hlContainer = document.createElement('div');
+    hlContainer.className = 'highlight-container';
+    hlContainer.dataset.page = num;
+    hlContainer.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;';
+    wrap.appendChild(hlContainer);
+
+    // Page number label
+    const label = document.createElement('div');
+    label.className = 'page-num';
+    label.textContent = num + ' / ' + pdfDoc.numPages;
+    wrap.appendChild(label);
+
+    container.appendChild(wrap);
+  }
+
+  // Render stored highlights
+  function renderHighlights() {
+    document.querySelectorAll('.highlight-container').forEach(c => c.innerHTML = '');
+    highlights.forEach((hl, idx) => {
+      const c = document.querySelector(`.highlight-container[data-page="${hl.page}"]`);
+      if (!c) return;
+      hl.rects.forEach(r => {
+        const div = document.createElement('div');
+        div.className = 'highlight-overlay';
+        div.dataset.hlIdx = idx;
+        div.style.left = r.x + 'px';
+        div.style.top = r.y + 'px';
+        div.style.width = r.w + 'px';
+        div.style.height = r.h + 'px';
+        c.appendChild(div);
+      });
+    });
+  }
+
+  // Get selection rects relative to page
+  function getSelectionInfo() {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) return null;
+
+    const range = sel.getRangeAt(0);
+    const text = sel.toString().trim();
+
+    // Find which page
+    let pageNum = null;
+    let pageWrap = null;
+    const anchor = sel.anchorNode.parentElement.closest('.page-wrap');
+    if (anchor) {
+      pageNum = parseInt(anchor.id.replace('page-', ''));
+      pageWrap = anchor;
+    }
+    if (!pageNum) return null;
+
+    // Get rects relative to page
+    const clientRects = range.getClientRects();
+    const wrapRect = pageWrap.getBoundingClientRect();
+    const rects = [];
+    for (let i = 0; i < clientRects.length; i++) {
+      const cr = clientRects[i];
+      if (cr.width < 1) continue;
+      rects.push({
+        x: cr.left - wrapRect.left,
+        y: cr.top - wrapRect.top,
+        w: cr.width,
+        h: cr.height
+      });
+    }
+
+    return { page: pageNum, text, rects };
+  }
+
+  // Show toolbar near selection
+  document.addEventListener('mouseup', () => {
+    setTimeout(() => {
+      const info = getSelectionInfo();
+      if (!info || !info.rects.length) { toolbar.style.display = 'none'; return; }
+      const lastRect = info.rects[info.rects.length - 1];
+      const pageWrap = document.getElementById('page-' + info.page);
+      const wrapRect = pageWrap.getBoundingClientRect();
+      toolbar.style.display = 'block';
+      toolbar.style.left = (wrapRect.left + lastRect.x + lastRect.w / 2 - 40) + 'px';
+      toolbar.style.top = (wrapRect.top + lastRect.y + lastRect.h + 6) + 'px';
+    }, 10);
+  });
+
+  // Highlight button
+  document.getElementById('hlBtn').addEventListener('click', () => {
+    const info = getSelectionInfo();
+    if (!info) return;
+    highlights.push(info);
+    renderHighlights();
+    toolbar.style.display = 'none';
+    window.getSelection().removeAllRanges();
+    // Send to parent
+    window.parent.postMessage({
+      type: 'newHighlight',
+      page: info.page,
+      text: info.text,
+      rects: info.rects
+    }, '*');
+    // Save all highlights
+    window.parent.postMessage({ type: 'allHighlights', highlights }, '*');
+  });
+
+  // Receive highlights from parent (on load)
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'goToPage') goTo(e.data.page);
+    if (e.data && e.data.type === 'loadHighlights') {
+      highlights = e.data.highlights || [];
+      renderHighlights();
+    }
+    if (e.data && e.data.type === 'highlightMarker') {
+      // Flash highlights for a specific page
+      document.querySelectorAll('.highlight-overlay').forEach(el => el.classList.remove('active'));
+      const idx = highlights.findIndex(h => h.page === e.data.page && h.text === e.data.text);
+      if (idx >= 0) {
+        document.querySelectorAll(`[data-hl-idx="${idx}"]`).forEach(el => {
+          el.classList.add('active');
+          setTimeout(() => el.classList.remove('active'), 2000);
+        });
+        goTo(e.data.page);
+      }
+    }
+  });
+
+  function updateCurrentPage() {
+    const wraps = document.querySelectorAll('.page-wrap');
+    let current = 1;
+    const scrollY = window.scrollY + window.innerHeight / 3;
+    wraps.forEach(w => {
+      if (w.offsetTop <= scrollY) current = parseInt(w.id.replace('page-', ''));
+    });
+    indicator.textContent = 'Page ' + current + ' of ' + pdfDoc.numPages;
+    window.parent.postMessage({ type: 'currentPage', page: current }, '*');
+  }
+
+  async function init() {
+    pdfDoc = await pdfjsLib.getDocument(fileUrl).promise;
+    for (let i = 1; i <= pdfDoc.numPages; i++) {
+      await renderPage(i);
+    }
+    updateCurrentPage();
+    window.addEventListener('scroll', updateCurrentPage);
+    checkHash();
+    // Request highlights from parent
+    window.parent.postMessage({ type: 'requestHighlights' }, '*');
+  }
+
+  function checkHash() {
+    const match = window.location.hash.match(/page=(\d+)/);
+    if (match) goTo(parseInt(match[1]));
+  }
+
+  function goTo(num) {
+    const el = document.getElementById('page-' + num);
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  window.addEventListener('hashchange', checkHash);
+  init();
+</script>
+</body>
+</html>

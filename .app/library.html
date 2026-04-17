@@ -1,0 +1,1612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Library Browser</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242734;
+    --border: #2e3140;
+    --text: #e4e6ed;
+    --text2: #8b8fa3;
+    --accent: #6c8cff;
+    --accent2: #4a6adf;
+    --tag-bg: #262a3a;
+    --tag-text: #9ca3c0;
+    --pdf: #e06c60;
+    --epub: #5bc49f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh;
+  }
+  .header { padding: 2rem 2rem 1rem; max-width: 1400px; margin: 0 auto; }
+  .header h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 0.25rem; }
+  .header .subtitle { color: var(--text2); font-size: 0.85rem; }
+  .controls {
+    max-width: 1400px; margin: 0 auto; padding: 1rem 2rem;
+    display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;
+  }
+  .search-box { flex: 1; min-width: 240px; position: relative; }
+  .search-box svg {
+    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    color: var(--text2); width: 16px; height: 16px;
+  }
+  .search-box input {
+    width: 100%; padding: 0.6rem 0.75rem 0.6rem 2.25rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 0.875rem; outline: none; transition: border-color 0.2s;
+  }
+  .search-box input:focus { border-color: var(--accent); }
+  .search-box input::placeholder { color: var(--text2); }
+  select, .btn {
+    padding: 0.6rem 0.75rem; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 0.875rem; outline: none;
+    cursor: pointer; transition: border-color 0.2s, color 0.2s; white-space: nowrap;
+  }
+  select {
+    padding-right: 2rem; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b8fa3' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 8px center;
+  }
+  select:focus, .btn:hover { border-color: var(--accent); color: var(--text); }
+  .btn { color: var(--text2); }
+  .btn.active { border-color: var(--accent); color: var(--accent); background: rgba(108,140,255,0.08); }
+  .stats {
+    display: flex; gap: 1.5rem; max-width: 1400px; margin: 0 auto;
+    padding: 0.5rem 2rem 0.5rem; font-size: 0.8rem; color: var(--text2);
+  }
+  .stats span strong { color: var(--text); font-weight: 600; }
+
+  /* Tag cloud bar */
+  .tag-bar {
+    max-width: 1400px; margin: 0 auto; padding: 0 2rem 1rem;
+    display: flex; gap: 0.4rem; flex-wrap: wrap;
+  }
+  .tag-pill {
+    padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.7rem; font-weight: 500;
+    background: var(--tag-bg); color: var(--tag-text); cursor: pointer;
+    border: 1px solid transparent; transition: all 0.15s;
+  }
+  .tag-pill:hover { border-color: var(--accent); color: var(--text); }
+  .tag-pill.active { background: rgba(108,140,255,0.15); color: var(--accent); border-color: var(--accent); }
+
+  /* Grid */
+  .grid {
+    max-width: 1400px; margin: 0 auto; padding: 0 2rem 3rem;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 0.75rem;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1rem 1.15rem; transition: border-color 0.2s, transform 0.15s;
+    cursor: pointer; text-decoration: none; color: inherit;
+    display: flex; flex-direction: column; gap: 0.5rem;
+  }
+  .card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; }
+  .card-title { font-size: 0.9rem; font-weight: 600; line-height: 1.35; flex: 1; }
+  .card-ext {
+    font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+    padding: 0.15rem 0.45rem; border-radius: 4px; flex-shrink: 0; margin-top: 2px;
+  }
+  .card-ext.pdf { background: rgba(224,108,96,0.15); color: var(--pdf); }
+  .card-ext.epub { background: rgba(91,196,159,0.15); color: var(--epub); }
+  .card-meta { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--text2); }
+  .card-author { font-weight: 500; }
+  .card-year {
+    background: var(--tag-bg); color: var(--tag-text); padding: 0.1rem 0.45rem;
+    border-radius: 4px; font-size: 0.75rem; font-weight: 500;
+  }
+  .card-bottom { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .card-category { font-size: 0.75rem; color: var(--accent); font-weight: 500; }
+  .card-tag {
+    font-size: 0.65rem; padding: 0.1rem 0.4rem; border-radius: 8px;
+    background: rgba(108,140,255,0.1); color: var(--accent);
+  }
+  .card-notes-icon { font-size: 0.7rem; color: var(--text2); margin-left: auto; }
+  .empty { grid-column: 1/-1; text-align: center; padding: 4rem 1rem; color: var(--text2); }
+
+  /* Graph */
+  #graphContainer {
+    max-width: 1400px; margin: 0 auto; padding: 0 2rem 3rem; display: none;
+  }
+  #graphContainer svg {
+    width: 100%; height: 600px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 10px;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 100; justify-content: center; align-items: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    width: 560px; max-width: 92vw; max-height: 85vh; overflow-y: auto;
+    padding: 1.75rem; display: flex; flex-direction: column; gap: 1.25rem;
+  }
+  .modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .modal-title { font-size: 1.1rem; font-weight: 600; line-height: 1.35; }
+  .modal-close {
+    background: none; border: none; color: var(--text2); font-size: 1.3rem;
+    cursor: pointer; padding: 0.2rem; line-height: 1;
+  }
+  .modal-close:hover { color: var(--text); }
+  .modal-info { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.8rem; color: var(--text2); }
+  .modal-open-btn {
+    padding: 0.5rem 1rem; background: var(--accent); color: #fff; border: none;
+    border-radius: 8px; font-size: 0.85rem; font-weight: 500; cursor: pointer;
+    transition: background 0.2s;
+  }
+  .modal-open-btn:hover { background: var(--accent2); }
+  .modal label { font-size: 0.8rem; font-weight: 600; color: var(--text2); display: block; margin-bottom: 0.35rem; }
+  .modal textarea {
+    width: 100%; min-height: 100px; padding: 0.65rem; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+    font-size: 0.85rem; font-family: inherit; resize: vertical; outline: none;
+    transition: border-color 0.2s;
+  }
+  .modal textarea:focus { border-color: var(--accent); }
+  .tag-input-wrap {
+    display: flex; flex-wrap: wrap; gap: 0.35rem; padding: 0.45rem;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    min-height: 38px; align-items: center; cursor: text;
+    transition: border-color 0.2s;
+  }
+  .tag-input-wrap:focus-within { border-color: var(--accent); }
+  .tag-input-wrap .tag-item {
+    display: flex; align-items: center; gap: 0.25rem; padding: 0.15rem 0.5rem;
+    background: rgba(108,140,255,0.15); color: var(--accent); border-radius: 10px;
+    font-size: 0.75rem; font-weight: 500;
+  }
+  .tag-item .tag-x {
+    cursor: pointer; font-size: 0.85rem; line-height: 1; opacity: 0.6;
+    transition: opacity 0.15s;
+  }
+  .tag-item .tag-x:hover { opacity: 1; }
+  .tag-input-wrap input {
+    border: none; background: none; color: var(--text); font-size: 0.8rem;
+    outline: none; flex: 1; min-width: 80px;
+  }
+  .tag-input-wrap input::placeholder { color: var(--text2); }
+  /* Concepts */
+  .concepts-header { display: flex; justify-content: space-between; align-items: center; }
+  .concepts-header label { margin-bottom: 0; }
+  .concept-add-btn {
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--accent); font-size: 0.75rem; padding: 0.25rem 0.6rem; cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .concept-add-btn:hover { border-color: var(--accent); }
+  .concept-list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .concept-item {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.6rem; display: flex; flex-direction: column; gap: 0.35rem;
+    transition: border-color 0.2s;
+  }
+  .concept-item:focus-within { border-color: var(--accent); }
+  .concept-name-row { display: flex; align-items: center; gap: 0.4rem; }
+  .concept-name-row .dot { color: var(--accent); font-size: 1rem; flex-shrink: 0; }
+  .concept-name-input {
+    flex: 1; border: none; background: none; color: var(--text); font-size: 0.85rem;
+    font-weight: 600; outline: none;
+  }
+  .concept-name-input::placeholder { color: var(--text2); font-weight: 400; }
+  .concept-del {
+    background: none; border: none; color: var(--text2); font-size: 1rem;
+    cursor: pointer; padding: 0 0.2rem; opacity: 0.4; transition: opacity 0.15s;
+  }
+  .concept-del:hover { opacity: 1; color: var(--pdf); }
+  .concept-note {
+    width: 100%; border: none; background: none; color: var(--text2); font-size: 0.8rem;
+    font-family: inherit; resize: none; outline: none; min-height: 2.2rem;
+    line-height: 1.4;
+  }
+  .concept-note::placeholder { color: var(--text2); opacity: 0.5; }
+  .concept-count { font-size: 0.65rem; color: var(--accent); opacity: 0.7; }
+
+  /* Markers */
+  .marker-list { display: flex; flex-direction: column; gap: 0.25rem; padding-left: 0.2rem; }
+  .marker-item {
+    display: flex; align-items: flex-start; gap: 0.35rem; font-size: 0.78rem;
+  }
+  .marker-page {
+    background: var(--accent2); color: #fff; border: none; border-radius: 4px;
+    font-size: 0.65rem; padding: 0.1rem 0.35rem; cursor: pointer; flex-shrink: 0;
+    font-weight: 600; transition: background 0.15s; min-width: 32px; text-align: center;
+  }
+  .marker-page:hover { background: var(--accent); }
+  .marker-page-input {
+    width: 36px; background: var(--surface2); border: none; border-radius: 4px;
+    color: var(--tag-text); font-size: 0.65rem; padding: 0.1rem 0.25rem; text-align: center;
+    outline: none; flex-shrink: 0;
+  }
+  .marker-page-input::placeholder { color: var(--text2); opacity: 0.5; }
+  .marker-note-input {
+    flex: 1; border: none; background: none; color: var(--text2); font-size: 0.78rem;
+    outline: none; font-family: inherit;
+  }
+  .marker-note-input::placeholder { color: var(--text2); opacity: 0.4; }
+  .marker-del {
+    background: none; border: none; color: var(--text2); font-size: 0.75rem;
+    cursor: pointer; opacity: 0.3; transition: opacity 0.15s; padding: 0; flex-shrink: 0;
+  }
+  .marker-del:hover { opacity: 1; color: var(--pdf); }
+  .marker-add {
+    background: none; border: none; color: var(--accent); font-size: 0.7rem;
+    cursor: pointer; padding: 0.15rem 0; opacity: 0.6; transition: opacity 0.15s;
+    text-align: left;
+  }
+  .marker-add:hover { opacity: 1; }
+  /* Autocomplete */
+  .ac-list {
+    position: absolute; left: 0; right: 0; top: 100%; z-index: 10;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    max-height: 120px; overflow-y: auto; display: none;
+  }
+  .ac-list.open { display: block; }
+  .ac-item {
+    padding: 0.35rem 0.6rem; font-size: 0.8rem; cursor: pointer; color: var(--text2);
+  }
+  .ac-item:hover { background: var(--surface2); color: var(--text); }
+  .concept-name-wrap { position: relative; flex: 1; }
+
+  .modal-saved {
+    font-size: 0.75rem; color: var(--epub); opacity: 0;
+    transition: opacity 0.3s; text-align: right;
+  }
+  .modal-saved.show { opacity: 1; }
+
+  /* Notes view */
+  #notesView {
+    max-width: 1400px; margin: 0 auto; padding: 0 2rem 3rem; display: none;
+  }
+  .notes-concept-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    margin-bottom: 0.75rem; overflow: hidden;
+  }
+  .notes-concept-header {
+    display: flex; align-items: center; gap: 0.5rem; padding: 1rem 1.15rem;
+    cursor: pointer; transition: background 0.15s;
+  }
+  .notes-concept-header:hover { background: var(--surface2); }
+  .notes-concept-toggle {
+    color: var(--text2); font-size: 0.7rem; transition: transform 0.2s; margin-left: auto;
+  }
+  .notes-concept-card.open .notes-concept-toggle { transform: rotate(90deg); }
+  .notes-concept-body {
+    max-height: 0; overflow: hidden; transition: max-height 0.3s ease;
+    padding: 0 1.15rem;
+  }
+  .notes-concept-card.open .notes-concept-body {
+    max-height: 5000px; padding: 0 1.15rem 1rem;
+  }
+  .notes-concept-name {
+    font-size: 1rem; font-weight: 700; color: var(--text);
+  }
+  .notes-concept-count {
+    font-size: 0.7rem; color: var(--text2); background: var(--tag-bg);
+    padding: 0.1rem 0.5rem; border-radius: 8px;
+  }
+  .notes-marker {
+    display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.45rem 0;
+    border-top: 1px solid var(--border);
+  }
+  .notes-marker:first-child { border-top: none; }
+  .notes-marker-page {
+    background: var(--accent2); color: #fff; border: none; border-radius: 4px;
+    font-size: 0.65rem; padding: 0.15rem 0.4rem; cursor: pointer; font-weight: 600;
+    flex-shrink: 0; transition: background 0.15s;
+  }
+  .notes-marker-page:hover { background: var(--accent); }
+  .notes-marker-body { flex: 1; min-width: 0; }
+  .notes-marker-note { font-size: 0.82rem; color: var(--text2); line-height: 1.4; }
+  .notes-marker-hl {
+    font-size: 0.75rem; color: var(--tag-text); font-style: italic; margin-top: 0.2rem;
+    border-left: 2px solid rgba(255,220,50,0.4); padding-left: 0.5rem;
+  }
+  .notes-marker-book {
+    font-size: 0.7rem; color: var(--accent); cursor: pointer; margin-top: 0.15rem;
+    opacity: 0.7; transition: opacity 0.15s;
+  }
+  .notes-marker-book:hover { opacity: 1; }
+  .notes-empty {
+    text-align: center; padding: 4rem 1rem; color: var(--text2);
+  }
+  .notes-search {
+    margin-bottom: 1rem; padding: 0.6rem 0.75rem;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 0.875rem; outline: none; width: 100%;
+    transition: border-color 0.2s;
+  }
+  .notes-search:focus { border-color: var(--accent); }
+  .notes-search::placeholder { color: var(--text2); }
+
+  /* Reader */
+  #readerView {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: var(--bg); flex-direction: column;
+  }
+  #readerView.open { display: flex; }
+  .reader-bar {
+    display: flex; align-items: center; gap: 1rem; padding: 0.6rem 1.25rem;
+    background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .reader-back {
+    background: none; border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 0.4rem 0.8rem; font-size: 0.8rem; cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .reader-back:hover { border-color: var(--accent); }
+  .reader-title { font-size: 0.85rem; font-weight: 500; color: var(--text2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .reader-toggle-panel {
+    background: none; border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text2); padding: 0.4rem 0.8rem; font-size: 0.75rem; cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .reader-toggle-panel:hover { border-color: var(--accent); color: var(--text); }
+  .reader-toggle-panel.active { border-color: var(--accent); color: var(--accent); }
+  .reader-body { display: flex; flex: 1; overflow: hidden; }
+  #readerFrame { flex: 1; border: none; min-width: 0; }
+
+  /* Notes panel */
+  .notes-panel {
+    width: 360px; flex-shrink: 0; background: var(--surface);
+    border-left: 1px solid var(--border); display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .notes-panel.hidden { display: none; }
+  .notes-panel-header {
+    padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .notes-panel-header label { font-size: 0.85rem; font-weight: 600; margin: 0; }
+  .notes-panel-body { padding: 0.75rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; flex: 1; overflow-y: auto; }
+  .notes-panel-tags { padding: 0.5rem 1rem; border-top: 1px solid var(--border); }
+  .notes-panel-tags label { font-size: 0.75rem; font-weight: 600; color: var(--text2); margin-bottom: 0.3rem; display: block; }
+
+  /* Concept item in panel */
+  .panel-concept {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.5rem 0.6rem; display: flex; flex-direction: column; gap: 0.3rem;
+  }
+  .panel-concept:focus-within { border-color: var(--accent); }
+  .panel-concept-top { display: flex; align-items: center; gap: 0.35rem; }
+  .panel-concept-top .dot { color: var(--accent); font-size: 0.8rem; }
+  .panel-concept-name {
+    flex: 1; border: none; background: none; color: var(--text); font-size: 0.8rem;
+    font-weight: 600; outline: none;
+  }
+  .panel-concept-name::placeholder { color: var(--text2); font-weight: 400; }
+  .panel-concept-page {
+    width: 50px; border: none; background: var(--surface2); color: var(--tag-text);
+    font-size: 0.7rem; padding: 0.15rem 0.3rem; border-radius: 4px; text-align: center; outline: none;
+  }
+  .panel-concept-page::placeholder { color: var(--text2); opacity: 0.5; }
+  .panel-concept-del {
+    background: none; border: none; color: var(--text2); font-size: 0.9rem;
+    cursor: pointer; opacity: 0.3; transition: opacity 0.15s; padding: 0;
+  }
+  .panel-concept-del:hover { opacity: 1; color: var(--pdf); }
+  .panel-concept-note {
+    width: 100%; border: none; background: none; color: var(--text2); font-size: 0.78rem;
+    font-family: inherit; resize: none; outline: none; min-height: 2rem; line-height: 1.4;
+  }
+  .panel-concept-note::placeholder { color: var(--text2); opacity: 0.4; }
+  .panel-marker-list { display: flex; flex-direction: column; gap: 0.2rem; }
+  .panel-marker-item { display: flex; align-items: flex-start; gap: 0.3rem; }
+  .panel-marker-page {
+    background: var(--accent2); color: #fff; border: none; border-radius: 4px;
+    font-size: 0.6rem; padding: 0.1rem 0.3rem; cursor: pointer; flex-shrink: 0;
+    font-weight: 600; transition: background 0.15s; min-width: 28px; text-align: center;
+  }
+  .panel-marker-page:hover { background: var(--accent); }
+  .panel-marker-page-input {
+    width: 32px; background: var(--surface2); border: none; border-radius: 4px;
+    color: var(--tag-text); font-size: 0.6rem; padding: 0.1rem 0.2rem; text-align: center; outline: none;
+  }
+  .panel-marker-note-input {
+    flex: 1; border: none; background: none; color: var(--text2); font-size: 0.75rem;
+    outline: none; font-family: inherit;
+  }
+  .panel-marker-note-input::placeholder { color: var(--text2); opacity: 0.4; }
+  .panel-marker-del {
+    background: none; border: none; color: var(--text2); font-size: 0.7rem;
+    cursor: pointer; opacity: 0.3; padding: 0;
+  }
+  .panel-marker-del:hover { opacity: 1; color: var(--pdf); }
+  .panel-marker-add {
+    background: none; border: none; color: var(--accent); font-size: 0.65rem;
+    cursor: pointer; padding: 0.1rem 0; opacity: 0.6;
+  }
+  .panel-marker-add:hover { opacity: 1; }
+  .panel-concept-wrap { position: relative; flex: 1; }
+  .panel-saved { font-size: 0.7rem; color: var(--epub); opacity: 0; transition: opacity 0.3s; text-align: right; padding: 0 1rem 0.5rem; }
+  .panel-saved.show { opacity: 1; }
+
+  /* EPUB nav */
+  .epub-nav {
+    position: absolute; bottom: 1rem; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 0.5rem; z-index: 10;
+  }
+  .epub-nav button {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 0.5rem 1.2rem; font-size: 0.85rem; cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .epub-nav button:hover { border-color: var(--accent); }
+  #epubContainer { position: relative; background: #0f1117; }
+  #epubArea { position: absolute; inset: 0; }
+
+  @media (max-width: 640px) {
+    .header, .controls, .stats, .tag-bar, .grid, #graphContainer { padding-left: 1rem; padding-right: 1rem; }
+    .grid { grid-template-columns: 1fr; }
+    .controls { flex-direction: column; }
+    .search-box { min-width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Library</h1>
+  <p class="subtitle">Personal academic collection</p>
+</div>
+
+<div class="controls">
+  <div class="search-box">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    <input type="text" id="search" placeholder="Search by title, author, keyword, or tag...">
+  </div>
+  <select id="categoryFilter"><option value="">All categories</option></select>
+  <select id="yearFilter"><option value="">All years</option></select>
+  <select id="formatFilter">
+    <option value="">All formats</option>
+    <option value="pdf">PDF</option>
+    <option value="epub">EPUB</option>
+  </select>
+  <button class="btn" id="sortBtn" title="Toggle sort">Year &#8595;</button>
+  <button class="btn" id="viewBtn" title="Toggle view">Graph</button>
+</div>
+
+<div class="stats">
+  <span>Showing <strong id="countShown">0</strong> of <strong id="countTotal">0</strong></span>
+  <span id="catCount"></span>
+</div>
+
+<div class="tag-bar" id="tagBar"></div>
+
+<div class="grid" id="grid"></div>
+
+<div id="graphContainer"><svg id="graphSvg"></svg></div>
+
+<div id="notesView">
+  <input type="text" class="notes-search" id="notesSearch" placeholder="Search concepts, notes, highlights...">
+  <div id="notesContent"></div>
+</div>
+
+<!-- Reader View -->
+<div id="readerView">
+  <div class="reader-bar">
+    <button class="reader-back" id="readerBack">&#8592; Back</button>
+    <span class="reader-title" id="readerTitle"></span>
+    <button class="reader-toggle-panel active" id="readerTogglePanel">Notes</button>
+  </div>
+  <div class="reader-body">
+    <iframe id="readerFrame"></iframe>
+    <div id="epubContainer" style="flex:1;min-width:0;display:none;overflow:hidden"></div>
+    <div class="notes-panel" id="notesPanel">
+      <div class="notes-panel-header">
+        <label>Concepts</label>
+        <button class="concept-add-btn" id="panelAddConcept">+ Add</button>
+      </div>
+      <div class="notes-panel-body" id="panelConceptList"></div>
+      <div class="panel-saved" id="panelSaved">Saved</div>
+      <div class="notes-panel-tags">
+        <label>Tags</label>
+        <div class="tag-input-wrap" id="panelTagWrap">
+          <input type="text" id="panelTagInput" placeholder="Type and press Enter...">
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modalTitle"></div>
+      <button class="modal-close" id="modalClose">&times;</button>
+    </div>
+    <div class="modal-info" id="modalInfo"></div>
+    <button class="modal-open-btn" id="modalOpen">Open file</button>
+    <div>
+      <div class="concepts-header">
+        <label>Concepts</label>
+        <button class="concept-add-btn" id="conceptAddBtn">+ Add</button>
+      </div>
+      <div class="concept-list" id="conceptList"></div>
+    </div>
+    <div>
+      <label>Tags</label>
+      <div class="tag-input-wrap" id="tagInputWrap">
+        <input type="text" id="tagInput" placeholder="Type and press Enter...">
+      </div>
+    </div>
+    <div class="modal-saved" id="modalSaved">Saved</div>
+  </div>
+</div>
+
+<script>
+let BOOKS = []; // Loaded from /api/catalog
+
+/* REMOVED: hardcoded book entries — now served by the Rust server */
+const _REMOVED = [
+  {author:"Alheraki",year:2024,title:"AI With C++",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"Alheraki.2024.AiWithCpp.ComputerScience.pdf"},
+  {author:"Alheraki & Others",year:2026,title:"Manuales De C++ Moderno Programacion Orientada A Objetos",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"AlherakiAndOthers.2026.ManualesDeCppModernoProgramacionOrientadaAObjetos.ComputerScience.pdf"},
+  {author:"Bhargava",year:2016,title:"Grokking Algorithms An Illustrated Guide For Programmers",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"Bhargava.2016.GrokkingAlgorithmsAnIllustratedGuideForProgrammers.ComputerScience.pdf"},
+  {author:"Blundell",year:2010,title:"Writing A Simple Operating System From Scratch",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"Blundell.2010.WritingASimpleOperatingSystemFromScratch.ComputerScience.pdf"},
+  {author:"Bryant & Others",year:2016,title:"Computer Systems A Programmers Perspective",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"BryantAndOthers.2016.ComputerSystemsAProgrammersPerspective.ComputerScience.pdf"},
+  {author:"Cormen & Others",year:2022,title:"Introduction To Algorithms",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"CormenAndOthers.2022.IntroductionToAlgorithms.ComputerScience.pdf"},
+  {author:"Erickson",year:2019,title:"Algorithms",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"Erickson.2019.Algorithms.ComputerScience.pdf"},
+  {author:"Frost & Others",year:2016,title:"Atomic Design",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"FrostAndOthers.2016.AtomicDesign.ComputerScience.pdf"},
+  {author:"Kirchprinz & Others",year:2002,title:"A Complete Guide To Programming In C++",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"KirchprinzAndOthers.2002.ACompleteGuideToProgrammingInCpp.ComputerScience.pdf"},
+  {author:"Kleppmann",year:2017,title:"Designing Data Intensive Applications",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"Kleppmann.2017.DesigningDataIntensiveApplications.ComputerScience.pdf"},
+  {author:"Lafore",year:2001,title:"Object Oriented Programming In C++",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"Lafore.2001.ObjectOrientedProgrammingInCpp.ComputerScience.pdf"},
+  {author:"Marzal & Gracia",year:1995,title:"Introduccion A La Programacion Con C",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"MarzalAndGracia.1995.IntroduccionALaProgramacionConC.ComputerScience.pdf"},
+  {author:"McDowell",year:2015,title:"Cracking The Coding Interview",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"McDowell.2015.CrackingTheCodingInterview.ComputerScience.pdf"},
+  {author:"Nielson & Others",year:2019,title:"Practical Cryptography In Python",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"NielsonAndOthers.2019.PracticalCryptographyInPython.ComputerScience.pdf"},
+  {author:"Skiena",year:2008,title:"The Algorithm Design Manual",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"Skiena.2008.TheAlgorithmDesignManual.ComputerScience.pdf"},
+  {author:"Stroustrup",year:2013,title:"The C++ Programming Language",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"Stroustrup.2013.TheCppProgrammingLanguage.ComputerScience.pdf"},
+  {author:"Wang & Others",year:2021,title:"Project And Thesis",category:"ComputerScience",path:"ComputerScience",ext:"pdf",file:"WangAndOthers.2021.ProjectAndThesis.ComputerScience.pdf"},
+  {author:"Dosovitskiy & Others",year:2021,title:"Transformers For Image Recognition At Scale",category:"DeepLearning",path:"DeepLearning",ext:"pdf",file:"DosovitskiyAndOthers.2021.TransformersForImageRecognitionAtScale.DeepLearning.pdf"},
+  {author:"Haitz Saez & Others",year:2025,title:"Mathematical Foundations Of Geometric Deep Learning",category:"DeepLearning",path:"DeepLearning",ext:"pdf",file:"HaitzSaezAndOthers.2025.MathematicalFoundationsOfGeometricDeepLearning.DeepLearning.pdf"},
+  {author:"Hays",year:2026,title:"Attention Mechanisms In Neural Networks",category:"DeepLearning",path:"DeepLearning",ext:"pdf",file:"Hays.2026.AttentionMechanismsInNeuralNetworks.DeepLearning.pdf"},
+  {author:"Jentzen & Others",year:2023,title:"Deep Learning Methods Implementations And Theory",category:"DeepLearning",path:"DeepLearning",ext:"pdf",file:"JentzenAndOthers.2023.DeepLearningMethodsImplementationsAndTheory.DeepLearning.pdf"},
+  {author:"Jentzen & Others",year:2025,title:"Mathematical Introduction To Deep Learning",category:"DeepLearning",path:"DeepLearning",ext:"pdf",file:"JentzenAndOthers.2025.MathematicalIntroductionToDeepLearning.DeepLearning.pdf"},
+  {author:"Lin & Others",year:2021,title:"A Survey Of Transformers",category:"DeepLearning",path:"DeepLearning",ext:"pdf",file:"LinAndOthers.2021.ASurveyOfTransformers.DeepLearning.pdf"},
+  {author:"Petersen & Others",year:2024,title:"Mathematical Theory Of Deep Learning",category:"DeepLearning",path:"DeepLearning",ext:"pdf",file:"PetersenAndOthers.2024.MathematicalTheoryOfDeepLearning.DeepLearning.pdf"},
+  {author:"Shehzad & Others",year:2022,title:"Graph Transformers A Survey",category:"DeepLearning",path:"DeepLearning",ext:"pdf",file:"ShehzadAndOthers.2022.GraphTransformersASurvey.DeepLearning.pdf"},
+  {author:"Vakalopoulou & Others",year:2023,title:"Deep Learning Basics And Convolutional Neural Networks",category:"DeepLearning",path:"DeepLearning",ext:"pdf",file:"VakalopoulouAndOthers.2023.DeepLearningBasicsAndConvolutionalNeuralNetworks.DeepLearning.pdf"},
+  {author:"Ye & Others",year:2024,title:"Differential Transformer",category:"DeepLearning",path:"DeepLearning",ext:"pdf",file:"YeAndOthers.2024.DifferentialTransformer.DeepLearning.pdf"},
+  {author:"Albrecht & Others",year:2024,title:"Multi Agent Reinforcement Learning",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"AlbrechtAndOthers.2024.MultiAgentReinforcementLearning.MachineLearning.pdf"},
+  {author:"Auffarth & Others",year:2023,title:"Generative AI With Langchain",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"AuffarthAndOthers.2023.GenerativeAiWithLangchain.MachineLearning.pdf"},
+  {author:"Avila & Ahmad",year:2025,title:"Architecting AI Software Systems",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"AvilaAndAhmad.2025.ArchitectingAISoftwareSystems.MachineLearning.pdf"},
+  {author:"Barocas & Others",year:2023,title:"Fairness And Machine Learning",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"BarocasAndOthers.2023.FairnessAndMachineLearning.MachineLearning.pdf"},
+  {author:"Bellemare & Others",year:2023,title:"Distributional Reinforcement Learning",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"BellemareAndOthers.2023.DistributionalReinforcementLearning.MachineLearning.pdf"},
+  {author:"Berryman & Others",year:2025,title:"Prompt Engineering For LLMs",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"BerrymanAndOthers.2025.PromptEngineeringForLlms.MachineLearning.pdf"},
+  {author:"Bhattacharjee & Others",year:2020,title:"Practical Machine Learning With Rust",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"BhattacharjeeAndOthers.2020.PracticalMachineLearningWithRust.MachineLearning.pdf"},
+  {author:"Blondel & Others",year:2024,title:"The Elements Of Differentiable Programming",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"BlondelAndOthers.2024.TheElementsOfDifferentiableProgramming.MachineLearning.pdf"},
+  {author:"Bouchard & Peters",year:2024,title:"Building LLMs For Production",category:"MachineLearning",path:"MachineLearning",ext:"epub",file:"BouchardAndPeters.2024.BuildingLlmsForProduction.MachineLearning.epub"},
+  {author:"Duyar",year:2026,title:"Overfitting And Generalisation In Machine Learning",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"Duyar.2026.OverfittingAndGeneralisationInMachineLearning.MachineLearning.pdf"},
+  {author:"Gutmann",year:2022,title:"Exercises In Machine Learning",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"Gutmann.2022.ExercisesInMachineLearning.MachineLearning.pdf"},
+  {author:"Hays",year:2026,title:"Encyclopedia Of Large Language Models And Foundation Models",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"Hays.2026.EncyclopediaOfLargeLanguageModelsAndFoundationModels.MachineLearning.pdf"},
+  {author:"Hutter & Others",year:2019,title:"Automated Machine Learning",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"HutterAndOthers.2019.AutomatedMachineLearning.MachineLearning.pdf"},
+  {author:"Janapa Reddi",year:2026,title:"Machine Learning Systems Principles And Practices",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"JanapaReddi.2026.MachineLearningSystemsPrinciplesAndPractices.MachineLearning.pdf"},
+  {author:"Kavanagh",year:2024,title:"Google Machine Learning And Generative AI For Solutions Architects",category:"MachineLearning",path:"MachineLearning",ext:"epub",file:"Kavanagh.2024.GoogleMachineLearningAndGenerativeAIForSolutionsArchitects.MachineLearning.epub"},
+  {author:"Kolodiazhnyi",year:2020,title:"Hands On Machine Learning With C++",category:"MachineLearning",path:"MachineLearning",ext:"epub",file:"Kolodiazhnyi.2020.HandsOnMachineLearningWithCpp.MachineLearning.epub"},
+  {author:"Kolodiazhnyi",year:2025,title:"Hands On Machine Learning With C++",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"Kolodiazhnyi.2025.HandsOnMachineLearningWithCpp.MachineLearning.pdf"},
+  {author:"Luu & Others",year:2024,title:"MLOps With Ray",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"LuuAndOthers.2024.MlopsWithRay.MachineLearning.pdf"},
+  {author:"McShane & Others",year:2024,title:"Agents In The Long Game Of AI",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"McShaneAndOthers.2024.AgentsInTheLongGameOfAI.MachineLearning.pdf"},
+  {author:"Mishra & Others",year:2019,title:"Machine Learning In The AWS Cloud",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"MishraAndOthers.2019.MachineLearningInTheAwsCloud.MachineLearning.pdf"},
+  {author:"Ng & Others",year:2022,title:"CS229 Lecture Notes",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"NgAndOthers.2022.Cs229LectureNotes.MachineLearning.pdf"},
+  {author:"Sutton & Barto",year:2018,title:"Reinforcement Learning An Introduction",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"SuttonAndBarto.2018.ReinforcementLearningAnIntroduction.MachineLearning.pdf"},
+  {author:"Xiao & Others",year:2025,title:"Foundations Of Large Language Models",category:"MachineLearning",path:"MachineLearning",ext:"pdf",file:"XiaoAndOthers.2025.FoundationsOfLargeLanguageModels.MachineLearning.pdf"},
+  {author:"Fuerte & Others",year:2007,title:"42 Problemas De Algebra",category:"Algebra",path:"Mathematics/Algebra",ext:"pdf",file:"FuerteAndOthers.2007.42ProblemasDeAlgebra.Algebra.pdf"},
+  {author:"Ivorra",year:2015,title:"Algebra",category:"Algebra",path:"Mathematics/Algebra",ext:"pdf",file:"Ivorra.2015.Algebra.Algebra.pdf"},
+  {author:"Perez",year:2012,title:"Algebra Abstracta",category:"Algebra",path:"Mathematics/Algebra",ext:"pdf",file:"Perez.2012.AlgebraAbstracta.Algebra.pdf"},
+  {author:"Raboso",year:2008,title:"Introduccion A La Teoria De Grupos Finitos",category:"Algebra",path:"Mathematics/Algebra",ext:"pdf",file:"Raboso.2008.IntroduccionALaTeoriaDeGruposFinitos.Algebra.pdf"},
+  {author:"Shurman",year:2013,title:"Multivariable Calculus",category:"Calculus",path:"Mathematics/Calculus",ext:"pdf",file:"Shurman.2013.MultivariableCalculus.Calculus.pdf"},
+  {author:"Papiernik & Others",year:2023,title:"Teoria De Categorias Aplicada A Los Algoritmos De Aprendizaje Supervisado",category:"Foundations",path:"Mathematics/Foundations",ext:"pdf",file:"PapiernikAndOthers.2023.TeoriaDeCategoriasAplicadaALosAlgoritmosDeAprendizajeSupervisado.Foundations.pdf"},
+  {author:"Rydeheard & Burstall",year:1988,title:"Computational Category Theory",category:"Foundations",path:"Mathematics/Foundations",ext:"pdf",file:"RydeheardAndBurstall.1988.ComputationalCategoryTheory.Foundations.pdf"},
+  {author:"Velleman",year:2019,title:"How To Prove It A Structured Approach",category:"Foundations",path:"Mathematics/Foundations",ext:"epub",file:"Velleman.2019.HowToProveItAStructuredApproach.Foundations.epub"},
+  {author:"Boumal",year:2023,title:"An Introduction To Optimization On Smooth Manifolds",category:"Geometry",path:"Mathematics/Geometry",ext:"pdf",file:"Boumal.2023.AnIntroductionToOptimizationOnSmoothManifolds.Geometry.pdf"},
+  {author:"Davis",year:2003,title:"Picks Theorem",category:"Geometry",path:"Mathematics/Geometry",ext:"pdf",file:"Davis.2003.PicksTheorem.Geometry.pdf"},
+  {author:"Decker & Others",year:1999,title:"A First Course In Computational Algebraic Geometry",category:"Geometry",path:"Mathematics/Geometry",ext:"pdf",file:"DeckerAndOthers.1999.AFirstCourseInComputationalAlgebraicGeometry.Geometry.pdf"},
+  {author:"Gartner & Others",year:2013,title:"Computational Geometry",category:"Geometry",path:"Mathematics/Geometry",ext:"pdf",file:"GartnerAndOthers.2013.ComputationalGeometry.Geometry.pdf"},
+  {author:"Ketterer",year:2024,title:"Geometry Of Metric Spaces",category:"Geometry",path:"Mathematics/Geometry",ext:"pdf",file:"Ketterer.2024.GeometryOfMetricSpaces.Geometry.pdf"},
+  {author:"Kuzmich & Others",year:2019,title:"Geometric Relations In An Arbitrary Metric Space",category:"Geometry",path:"Mathematics/Geometry",ext:"pdf",file:"KuzmichAndOthers.2019.GeometricRelationsInAnArbitraryMetricSpace.Geometry.pdf"},
+  {author:"Petrunin",year:2023,title:"Euclidean Plane And Its Relatives",category:"Geometry",path:"Mathematics/Geometry",ext:"pdf",file:"Petrunin.2023.EuclideanPlaneAndItsRelatives.Geometry.pdf"},
+  {author:"Sanchez & Others",year:2012,title:"Material Complementario De Geometria Diferencial",category:"Geometry",path:"Mathematics/Geometry",ext:"pdf",file:"SanchezAndOthers.2012.MaterialComplementarioDeGeometriaDiferencial.Geometry.pdf"},
+  {author:"Sanchez Yali & Others",year:2013,title:"Inmersiones Afines En Variedades Homogeneas",category:"Geometry",path:"Mathematics/Geometry",ext:"pdf",file:"SanchezYaliAndOthers.2013.InmersionesAfinesEnVariedadesHomogeneas.Geometry.pdf"},
+  {author:"Schuller",year:2013,title:"Lectures On The Geometry Anatomy Of Theoretical Physics",category:"Geometry",path:"Mathematics/Geometry",ext:"pdf",file:"Schuller.2013.LecturesOnTheGeometryAnatomyOfTheoreticalPhysics.Geometry.pdf"},
+  {author:"Deisenroth & Others",year:2020,title:"Mathematics For Machine Learning",category:"MathForML",path:"Mathematics/MathForML",ext:"pdf",file:"DeisenrothAndOthers.2020.MathematicsForMachineLearning.MathForML.pdf"},
+  {author:"Thomas",year:2018,title:"Mathematics For Machine Learning",category:"MathForML",path:"Mathematics/MathForML",ext:"pdf",file:"Thomas.2018.MathematicsForMachineLearning.MathForML.pdf"},
+  {author:"Langtangen & Linge",year:2016,title:"Finite Difference Computing With PDEs A Modern Software Approach",category:"NumericalMethods",path:"Mathematics/NumericalMethods",ext:"pdf",file:"LangtangenAndLinge.2016.FiniteDifferenceComputingWithPDEsAModernSoftwareApproach.NumericalMethods.pdf"},
+  {author:"Mathew",year:2008,title:"Domain Decomposition Methods For Numerical Solution Of PDEs",category:"NumericalMethods",path:"Mathematics/NumericalMethods",ext:"pdf",file:"Mathew.2008.DomainDecompositionMethodsForNumericalSolutionOfPDEs.NumericalMethods.pdf"},
+  {author:"Sanchez Yali",year:2018,title:"Formas Matriciales Para Los Metodos En Diferencias Finitas",category:"NumericalMethods",path:"Mathematics/NumericalMethods",ext:"pdf",file:"SanchezYali.2018.FormasMatricialesParaLosMetodosEnDiferenciasFinitas.NumericalMethods.pdf"},
+  {author:"Wohlmuth",year:2001,title:"Discretization Methods And Iterative Solvers Based On Domain Decomposition",category:"NumericalMethods",path:"Mathematics/NumericalMethods",ext:"pdf",file:"Wohlmuth.2001.DiscretizationMethodsAndIterativeSolversBasedOnDomainDecomposition.NumericalMethods.pdf"},
+  {author:"Zuazua",year:2009,title:"Metodos Numericos De Resolucion De Ecuaciones En Derivadas Parciales",category:"NumericalMethods",path:"Mathematics/NumericalMethods",ext:"pdf",file:"Zuazua.2009.MetodosNumericosDeResolucionDeEcuacionesEnDerivadasParciales.NumericalMethods.pdf"},
+  {author:"Hastie & Others",year:2001,title:"The Elements Of Statistical Learning",category:"Statistics",path:"Mathematics/Statistics",ext:"pdf",file:"HastieAndOthers.2001.TheElementsOfStatisticalLearning.Statistics.pdf"},
+  {author:"Ledolter & Others",year:2007,title:"Experimental Design With Applications In Marketing And Service Operations",category:"Statistics",path:"Mathematics/Statistics",ext:"pdf",file:"LedolterAndOthers.2007.ExperimentalDesignWithApplicationsInMarketingAndServiceOperations.Statistics.pdf"},
+  {author:"Melo & Others",year:2020,title:"Diseno De Experimentos",category:"Statistics",path:"Mathematics/Statistics",ext:"pdf",file:"MeloAndOthers.2020.DisenoDeExperimentos.Statistics.pdf"},
+  {author:"Ojeda & Others",year:2008,title:"Metodos Matematicos Para Estadistica",category:"Statistics",path:"Mathematics/Statistics",ext:"pdf",file:"OjedaAndOthers.2008.MetodosMatematicosParaEstadistica.Statistics.pdf"},
+  {author:"Rincon",year:2014,title:"Introduccion A La Probabilidad Y Estadistica",category:"Statistics",path:"Mathematics/Statistics",ext:"pdf",file:"Rincon.2014.IntroduccionALaProbabilidadYEstadistica.Statistics.pdf"},
+  {author:"Rincon",year:2019,title:"Una Introduccion A La Estadistica Inferencial",category:"Statistics",path:"Mathematics/Statistics",ext:"pdf",file:"Rincon.2019.UnaIntroduccionALaEstadisticaInferencial.Statistics.pdf"},
+  {author:"Ford & Others",year:2021,title:"Software Architecture The Hard Parts",category:"SoftwareEngineering",path:"SoftwareEngineering",ext:"pdf",file:"FordAndOthers.2021.SoftwareArchitectureTheHardParts.SoftwareEngineering.pdf"},
+  {author:"Ford & Others",year:2023,title:"Building Evolutionary Architectures",category:"SoftwareEngineering",path:"SoftwareEngineering",ext:"pdf",file:"FordAndOthers.2023.BuildingEvolutionaryArchitectures.SoftwareEngineering.pdf"},
+  {author:"Jacobs & Others",year:2006,title:"Accelerating Process Improvement Using Agile Techniques",category:"SoftwareEngineering",path:"SoftwareEngineering",ext:"pdf",file:"JacobsAndOthers.2006.AcceleratingProcessImprovementUsingAgileTechniques.SoftwareEngineering.pdf"},
+  {author:"Keeling & Others",year:2013,title:"Design It",category:"SoftwareEngineering",path:"SoftwareEngineering",ext:"pdf",file:"KeelingAndOthers.2013.DesignIt.SoftwareEngineering.pdf"},
+  {author:"Khononov",year:2025,title:"Balancing Coupling In Software Design",category:"SoftwareEngineering",path:"SoftwareEngineering",ext:"epub",file:"Khononov.2025.BalancingCouplingInSoftwareDesign.SoftwareEngineering.epub"},
+  {author:"Laprie & Others",year:2024,title:"Software Design For Resilient Computer Systems",category:"SoftwareEngineering",path:"SoftwareEngineering",ext:"pdf",file:"LaprieAndOthers.2024.SoftwareDesignForResilientComputerSystems.SoftwareEngineering.pdf"},
+  {author:"Maier & Others",year:2000,title:"The Art Of Systems Architecting",category:"SoftwareEngineering",path:"SoftwareEngineering",ext:"pdf",file:"MaierAndOthers.2000.TheArtOfSystemsArchitecting.SoftwareEngineering.pdf"},
+  {author:"Percival & Gregory",year:2021,title:"Architecture Patterns With Python",category:"SoftwareEngineering",path:"SoftwareEngineering",ext:"pdf",file:"PercivalAndGregory.2021.ArchitecturePatternsWithPython.SoftwareEngineering.pdf"},
+  {author:"Richards & Others",year:2015,title:"Software Architecture Patterns",category:"SoftwareEngineering",path:"SoftwareEngineering",ext:"pdf",file:"RichardsAndOthers.2015.SoftwareArchitecturePatterns.SoftwareEngineering.pdf"},
+  {author:"Richards & Others",year:2020,title:"Fundamentals Of Software Architecture",category:"SoftwareEngineering",path:"SoftwareEngineering",ext:"pdf",file:"RichardsAndOthers.2020.FundamentalsOfSoftwareArchitecture.SoftwareEngineering.pdf"},
+];
+
+// ── State ──
+let sortAsc = false, currentSort = 'year', viewMode = 'cards', activeTag = '', libraryData = {};
+
+// ── Data persistence ──
+async function loadCatalog() {
+  try { BOOKS = await (await fetch('/api/catalog')).json(); } catch { BOOKS = []; }
+}
+async function loadData() {
+  try { libraryData = await (await fetch('/api/data')).json(); } catch { libraryData = {}; }
+}
+async function saveData() {
+  await fetch('/api/data', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(libraryData) });
+}
+function getBookData(file) {
+  const bd = libraryData[file] || { concepts: [], tags: [] };
+  // Migrate old single-notes format
+  if (typeof bd.notes === 'string' && bd.notes.trim()) {
+    bd.concepts = bd.concepts || [];
+    bd.concepts.unshift({ name: 'general', markers: [{ page: '', note: bd.notes }] });
+    delete bd.notes;
+    libraryData[file] = bd;
+  }
+  if (!bd.concepts) bd.concepts = [];
+  // Migrate old flat concept format {name, page, note} → {name, markers: [{page, note}]}
+  bd.concepts = bd.concepts.map(c => {
+    if (!c.markers) {
+      return { name: c.name || '', markers: (c.note || c.page) ? [{ page: c.page || '', note: c.note || '' }] : [] };
+    }
+    return c;
+  });
+  if (!bd.tags) bd.tags = [];
+  return bd;
+}
+function getAllConcepts() {
+  const concepts = new Map();
+  BOOKS.forEach(b => {
+    (getBookData(b.file).concepts || []).forEach(c => {
+      if (c.name) concepts.set(c.name, (concepts.get(c.name)||0)+1);
+    });
+  });
+  return [...concepts.entries()].sort((a,b) => b[1]-a[1]);
+}
+
+// ── Filters ──
+function populateFilters() {
+  const cats = [...new Set(BOOKS.map(b => b.category))].sort();
+  const years = [...new Set(BOOKS.map(b => b.year))].sort((a, b) => b - a);
+  const catSel = document.getElementById('categoryFilter'), yearSel = document.getElementById('yearFilter');
+  cats.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; catSel.appendChild(o); });
+  years.forEach(y => { const o = document.createElement('option'); o.value = y; o.textContent = y; yearSel.appendChild(o); });
+}
+
+function getAllTags() {
+  const tags = new Map();
+  BOOKS.forEach(b => {
+    (getBookData(b.file).tags || []).forEach(t => tags.set(t, (tags.get(t)||0)+1));
+  });
+  return [...tags.entries()].sort((a,b) => b[1]-a[1]);
+}
+
+function renderTagBar() {
+  const tags = getAllTags();
+  document.getElementById('tagBar').innerHTML = tags.map(([t, n]) =>
+    `<span class="tag-pill${activeTag===t?' active':''}" data-tag="${t}">${t} (${n})</span>`
+  ).join('');
+  document.querySelectorAll('.tag-pill').forEach(el => el.addEventListener('click', () => {
+    activeTag = activeTag === el.dataset.tag ? '' : el.dataset.tag;
+    render();
+  }));
+}
+
+function getFiltered() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const cat = document.getElementById('categoryFilter').value;
+  const year = document.getElementById('yearFilter').value;
+  const fmt = document.getElementById('formatFilter').value;
+
+  let filtered = BOOKS.filter(b => {
+    if (cat && b.category !== cat) return false;
+    if (year && b.year !== +year) return false;
+    if (fmt && b.ext !== fmt) return false;
+    const bd = getBookData(b.file);
+    if (activeTag && !(bd.tags || []).includes(activeTag)) return false;
+    if (q) {
+      const conceptNames = (bd.concepts||[]).map(c => c.name).join(' ');
+      const hay = (b.title + ' ' + b.author + ' ' + b.category + ' ' + (bd.tags||[]).join(' ') + ' ' + conceptNames).toLowerCase();
+      return q.split(/\s+/).every(w => hay.includes(w));
+    }
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    let cmp = 0;
+    if (currentSort === 'year') cmp = a.year - b.year;
+    else if (currentSort === 'title') cmp = a.title.localeCompare(b.title);
+    else if (currentSort === 'author') cmp = a.author.localeCompare(b.author);
+    return sortAsc ? cmp : -cmp;
+  });
+  return filtered;
+}
+
+// ── Render ──
+function render() {
+  renderTagBar();
+  const filtered = getFiltered();
+  document.getElementById('countShown').textContent = filtered.length;
+  document.getElementById('countTotal').textContent = BOOKS.length;
+
+  const catCounts = {};
+  filtered.forEach(b => { catCounts[b.category] = (catCounts[b.category]||0)+1; });
+  document.getElementById('catCount').textContent = Object.entries(catCounts).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([c,n])=>`${c} (${n})`).join(', ');
+
+  document.getElementById('grid').style.display = 'none';
+  document.getElementById('graphContainer').style.display = 'none';
+  document.getElementById('notesView').style.display = 'none';
+
+  if (viewMode === 'graph') {
+    document.getElementById('graphContainer').style.display = 'block';
+    renderGraph(filtered);
+    return;
+  }
+
+  if (viewMode === 'notes') {
+    document.getElementById('notesView').style.display = 'block';
+    renderNotesView();
+    return;
+  }
+
+  document.getElementById('grid').style.display = '';
+  const grid = document.getElementById('grid');
+
+  if (!filtered.length) { grid.innerHTML = '<div class="empty"><div style="font-size:2.5rem;margin-bottom:0.75rem">O</div><div>No books match your filters</div></div>'; return; }
+
+  grid.innerHTML = filtered.map(b => {
+    const bd = getBookData(b.file);
+    const tags = (bd.tags||[]).slice(0,3).map(t => `<span class="card-tag">${t}</span>`).join('');
+    const cc = (bd.concepts||[]).length;
+    const conceptBadge = cc ? `<span class="concept-count">${cc} concept${cc>1?'s':''}</span>` : '';
+    return `
+    <div class="card" data-file="${b.file}">
+      <div class="card-top">
+        <div class="card-title">${b.title}</div>
+        <span class="card-ext ${b.ext}">${b.ext}</span>
+      </div>
+      <div class="card-meta">
+        <span class="card-author">${b.author}</span>
+        <span class="card-year">${b.year}</span>
+      </div>
+      <div class="card-bottom">
+        <span class="card-category">${b.path}</span>
+        ${tags}${conceptBadge}
+      </div>
+    </div>`;
+  }).join('');
+
+  document.querySelectorAll('.card').forEach(el => el.addEventListener('click', () => openModal(el.dataset.file)));
+}
+
+// ── Modal ──
+let currentModalFile = null;
+
+function openModal(file) {
+  const b = BOOKS.find(x => x.file === file);
+  if (!b) return;
+  currentModalFile = file;
+  const bd = getBookData(file);
+
+  document.getElementById('modalTitle').textContent = b.title;
+  document.getElementById('modalInfo').innerHTML = `
+    <span>${b.author}</span> &middot; <span>${b.year}</span> &middot;
+    <span class="card-ext ${b.ext}" style="display:inline">${b.ext}</span> &middot;
+    <span style="color:var(--accent)">${b.path}</span>
+    <div style="width:100%;margin-top:0.3rem;font-size:0.7rem;color:var(--text2);opacity:0.7;word-break:break-all">${b.file}</div>`;
+  renderConcepts(bd.concepts || []);
+  renderModalTags(bd.tags || []);
+  document.getElementById('modalSaved').classList.remove('show');
+  document.getElementById('modalOverlay').classList.add('open');
+
+  // Open button — always open in reader (PDFs and EPUBs)
+  document.getElementById('modalOpen').onclick = () => {
+    const filePath = `${b.path}/${b.file}`;
+    document.getElementById('modalOverlay').classList.remove('open');
+    openReader(b, filePath);
+  };
+}
+
+function renderModalTags(tags) {
+  const wrap = document.getElementById('tagInputWrap');
+  const input = document.getElementById('tagInput');
+  wrap.querySelectorAll('.tag-item').forEach(el => el.remove());
+  tags.forEach(t => {
+    const span = document.createElement('span');
+    span.className = 'tag-item';
+    span.innerHTML = `${t} <span class="tag-x">&times;</span>`;
+    span.querySelector('.tag-x').addEventListener('click', () => { removeTag(t); });
+    wrap.insertBefore(span, input);
+  });
+}
+
+function addTag(tag) {
+  tag = tag.trim().toLowerCase().replace(/[^a-z0-9\-]/g, '');
+  if (!tag || !currentModalFile) return;
+  const bd = getBookData(currentModalFile);
+  if (!bd.tags) bd.tags = [];
+  if (bd.tags.includes(tag)) return;
+  bd.tags.push(tag);
+  libraryData[currentModalFile] = bd;
+  renderModalTags(bd.tags);
+  saveAndFlash();
+}
+
+function removeTag(tag) {
+  if (!currentModalFile) return;
+  const bd = getBookData(currentModalFile);
+  bd.tags = (bd.tags||[]).filter(t => t !== tag);
+  libraryData[currentModalFile] = bd;
+  renderModalTags(bd.tags);
+  saveAndFlash();
+}
+
+async function saveAndFlash() {
+  await saveData();
+  render();
+  const el = document.getElementById('modalSaved');
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 1500);
+}
+
+// ── Concepts (modal) ──
+function renderConcepts(concepts) {
+  const list = document.getElementById('conceptList');
+  list.innerHTML = '';
+  concepts.forEach((c, ci) => {
+    const div = document.createElement('div');
+    div.className = 'concept-item';
+
+    // Header row
+    const header = document.createElement('div');
+    header.className = 'concept-name-row';
+    header.innerHTML = `
+      <span class="dot">&#9679;</span>
+      <div class="concept-name-wrap">
+        <input class="concept-name-input" value="${(c.name||'').replace(/"/g,'&quot;')}" placeholder="Concept name...">
+        <div class="ac-list"></div>
+      </div>
+      <button class="concept-del">&times;</button>`;
+    div.appendChild(header);
+
+    // Markers
+    const markerList = document.createElement('div');
+    markerList.className = 'marker-list';
+    (c.markers||[]).forEach((m, mi) => {
+      const row = document.createElement('div');
+      row.className = 'marker-item';
+      row.innerHTML = `
+        <input class="marker-page-input" value="${m.page||''}" placeholder="p.">
+        <input class="marker-note-input" value="${(m.note||'').replace(/"/g,'&quot;')}" placeholder="Idea or note...">
+        <button class="marker-del">&times;</button>`;
+      row.querySelector('.marker-page-input').addEventListener('blur', () => saveModalConcepts());
+      row.querySelector('.marker-note-input').addEventListener('blur', () => saveModalConcepts());
+      row.querySelector('.marker-del').addEventListener('click', () => {
+        c.markers.splice(mi, 1);
+        libraryData[currentModalFile] = getBookData(currentModalFile);
+        renderConcepts(concepts);
+        saveAndFlash();
+      });
+      markerList.appendChild(row);
+    });
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'marker-add';
+    addBtn.textContent = '+ marker';
+    addBtn.addEventListener('click', () => {
+      if (!c.markers) c.markers = [];
+      c.markers.push({ page: '', note: '' });
+      renderConcepts(concepts);
+    });
+    markerList.appendChild(addBtn);
+    div.appendChild(markerList);
+    list.appendChild(div);
+
+    // Autocomplete
+    const nameInput = div.querySelector('.concept-name-input');
+    const acList = div.querySelector('.ac-list');
+    nameInput.addEventListener('input', () => {
+      const val = nameInput.value.toLowerCase();
+      if (!val) { acList.classList.remove('open'); return; }
+      const all = getAllConcepts().map(([n]) => n).filter(n => n.includes(val) && n !== val);
+      if (!all.length) { acList.classList.remove('open'); return; }
+      acList.innerHTML = all.slice(0,6).map(n => `<div class="ac-item">${n}</div>`).join('');
+      acList.classList.add('open');
+      acList.querySelectorAll('.ac-item').forEach(el => el.addEventListener('mousedown', e => {
+        e.preventDefault(); nameInput.value = el.textContent; acList.classList.remove('open'); saveModalConcepts();
+      }));
+    });
+    nameInput.addEventListener('blur', () => { setTimeout(() => acList.classList.remove('open'), 150); saveModalConcepts(); });
+    div.querySelector('.concept-del').addEventListener('click', () => {
+      concepts.splice(ci, 1);
+      const bd = getBookData(currentModalFile);
+      bd.concepts = concepts;
+      libraryData[currentModalFile] = bd;
+      renderConcepts(concepts);
+      saveAndFlash();
+    });
+  });
+}
+
+function saveModalConcepts() {
+  if (!currentModalFile) return;
+  const bd = getBookData(currentModalFile);
+  const items = document.querySelectorAll('#conceptList .concept-item');
+  bd.concepts = [...items].map(el => {
+    const markers = [...el.querySelectorAll('.marker-item')].map(row => ({
+      page: row.querySelector('.marker-page-input').value.trim(),
+      note: row.querySelector('.marker-note-input').value
+    }));
+    return { name: el.querySelector('.concept-name-input').value.trim().toLowerCase(), markers };
+  }).filter(c => c.name || c.markers.some(m => m.note));
+  libraryData[currentModalFile] = bd;
+  saveAndFlash();
+}
+
+document.getElementById('conceptAddBtn').addEventListener('click', () => {
+  if (!currentModalFile) return;
+  const bd = getBookData(currentModalFile);
+  bd.concepts.push({ name: '', markers: [{ page: '', note: '' }] });
+  libraryData[currentModalFile] = bd;
+  renderConcepts(bd.concepts);
+  const inputs = document.querySelectorAll('.concept-name-input');
+  if (inputs.length) inputs[inputs.length-1].focus();
+});
+
+// Modal events
+document.getElementById('modalClose').addEventListener('click', () => document.getElementById('modalOverlay').classList.remove('open'));
+document.getElementById('modalOverlay').addEventListener('click', e => { if (e.target === e.currentTarget) document.getElementById('modalOverlay').classList.remove('open'); });
+document.getElementById('tagInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); addTag(e.target.value); e.target.value = ''; }
+});
+document.getElementById('tagInputWrap').addEventListener('click', () => document.getElementById('tagInput').focus());
+
+// ── Notes view ──
+function renderNotesView() {
+  const q = document.getElementById('notesSearch').value.toLowerCase();
+  const content = document.getElementById('notesContent');
+
+  // Collect all concepts across all books, merge by name
+  const conceptMap = new Map(); // name -> [{ book, marker, concept }]
+  BOOKS.forEach(b => {
+    const bd = getBookData(b.file);
+    (bd.concepts||[]).forEach(c => {
+      if (!c.name) return;
+      if (!conceptMap.has(c.name)) conceptMap.set(c.name, []);
+      (c.markers||[]).forEach(m => {
+        conceptMap.get(c.name).push({ book: b, marker: m });
+      });
+      // Concept with no markers still shows
+      if (!c.markers || !c.markers.length) {
+        conceptMap.get(c.name).push({ book: b, marker: null });
+      }
+    });
+  });
+
+  // Filter by search
+  let entries = [...conceptMap.entries()];
+  if (q) {
+    entries = entries.filter(([name, items]) => {
+      const hay = name + ' ' + items.map(i =>
+        (i.marker?.note || '') + ' ' + (i.marker?.highlights?.map(h => h.text).join(' ') || '') + ' ' + i.book.title + ' ' + i.book.author
+      ).join(' ');
+      return hay.toLowerCase().includes(q);
+    });
+  }
+
+  // Sort by total markers count
+  entries.sort((a, b) => b[1].length - a[1].length);
+
+  if (!entries.length) {
+    content.innerHTML = '<div class="notes-empty"><div style="font-size:2rem;margin-bottom:0.5rem">&#9998;</div><div>' +
+      (q ? 'No results for "' + q + '"' : 'No concepts yet. Open a book and start adding concepts.') + '</div></div>';
+    return;
+  }
+
+  content.innerHTML = entries.map(([name, items]) => {
+    const bookCount = new Set(items.map(i => i.book.file)).size;
+    const markerCount = items.filter(i => i.marker).length;
+    const markersHtml = items.filter(i => i.marker).map(i => {
+      const m = i.marker;
+      const hlHtml = (m.highlights||[]).map(h =>
+        `<div class="notes-marker-hl">"${h.text}"</div>`
+      ).join('');
+      return `
+        <div class="notes-marker">
+          ${m.page ? `<button class="notes-marker-page" data-file="${i.book.file}" data-page="${m.page}">p.${m.page}</button>` : ''}
+          <div class="notes-marker-body">
+            ${m.note ? `<div class="notes-marker-note">${m.note}</div>` : ''}
+            ${hlHtml}
+            <div class="notes-marker-book" data-file="${i.book.file}">${i.book.title} — ${i.book.author} (${i.book.year})</div>
+          </div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="notes-concept-card open">
+        <div class="notes-concept-header">
+          <span class="dot" style="color:var(--accent)">&#9679;</span>
+          <span class="notes-concept-name">${name}</span>
+          <span class="notes-concept-count">${bookCount} book${bookCount > 1 ? 's' : ''} &middot; ${markerCount} marker${markerCount !== 1 ? 's' : ''}</span>
+          <span class="notes-concept-toggle">&#9654;</span>
+        </div>
+        <div class="notes-concept-body">
+          ${markersHtml}
+        </div>
+      </div>`;
+  }).join('');
+
+  // Accordion toggle
+  content.querySelectorAll('.notes-concept-header').forEach(header => {
+    header.addEventListener('click', () => {
+      header.parentElement.classList.toggle('open');
+    });
+  });
+
+  // Event: click page button → open book at page
+  content.querySelectorAll('.notes-marker-page').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const file = btn.dataset.file;
+      const page = btn.dataset.page;
+      const b = BOOKS.find(x => x.file === file);
+      if (b) {
+        const filePath = `${b.path}/${b.file}`;
+        openReader(b, filePath);
+        setTimeout(() => navigateToPage(page), 1000);
+      }
+    });
+  });
+
+  // Event: click book name → open modal
+  content.querySelectorAll('.notes-marker-book').forEach(el => {
+    el.addEventListener('click', () => openModal(el.dataset.file));
+  });
+}
+
+document.getElementById('notesSearch').addEventListener('input', renderNotesView);
+
+// ── Graph ──
+const CAT_COLORS = {};
+function catColor(cat) {
+  if (!CAT_COLORS[cat]) {
+    const hue = Object.keys(CAT_COLORS).length * 137.5 % 360;
+    CAT_COLORS[cat] = `hsl(${hue}, 55%, 55%)`;
+  }
+  return CAT_COLORS[cat];
+}
+
+function renderGraph(filtered) {
+  const svg = d3.select('#graphSvg');
+  svg.selectAll('*').remove();
+  const width = svg.node().clientWidth, height = svg.node().clientHeight;
+
+  // Bipartite graph: book nodes + concept nodes + links between them
+  const conceptSet = new Set();
+  const bookNodes = [];
+  const links = [];
+
+  filtered.forEach(b => {
+    const bd = getBookData(b.file);
+    const cnames = (bd.concepts||[]).map(c => c.name).filter(Boolean);
+    bookNodes.push({ id: 'book:' + b.file, type: 'book', book: b, r: 10, conceptCount: cnames.length });
+    cnames.forEach(c => {
+      conceptSet.add(c);
+      links.push({ source: 'book:' + b.file, target: 'concept:' + c });
+    });
+  });
+
+  const conceptNodes = [...conceptSet].map(name => {
+    const count = links.filter(l => l.target === 'concept:' + name).length;
+    return { id: 'concept:' + name, type: 'concept', name, r: 6 + count * 3, bookCount: count };
+  });
+
+  const allNodes = [...bookNodes, ...conceptNodes];
+
+  if (!conceptNodes.length) {
+    svg.append('text').text('Add concepts to books to see the knowledge graph')
+      .attr('x', width/2).attr('y', height/2).attr('text-anchor', 'middle')
+      .attr('fill', '#555b73').attr('font-size', '14px');
+    return;
+  }
+
+  const sim = d3.forceSimulation(allNodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(80))
+    .force('charge', d3.forceManyBody().strength(d => d.type === 'book' ? -250 : -150))
+    .force('center', d3.forceCenter(width/2, height/2))
+    .force('collision', d3.forceCollide().radius(d => d.r + 6));
+
+  const g = svg.append('g');
+  svg.call(d3.zoom().scaleExtent([0.15, 5]).on('zoom', e => g.attr('transform', e.transform)));
+
+  // Links
+  const link = g.append('g').selectAll('line').data(links).join('line')
+    .attr('stroke', '#2e3140').attr('stroke-width', 1);
+
+  // Nodes
+  const node = g.append('g').selectAll('g').data(allNodes).join('g')
+    .style('cursor', 'pointer')
+    .call(d3.drag()
+      .on('start', (e,d) => { if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag', (e,d) => { d.fx=e.x; d.fy=e.y; })
+      .on('end', (e,d) => { if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }));
+
+  // Book nodes: rounded rect
+  node.filter(d => d.type === 'book').append('rect')
+    .attr('width', d => d.r * 2).attr('height', d => d.r * 2)
+    .attr('x', d => -d.r).attr('y', d => -d.r)
+    .attr('rx', 4).attr('ry', 4)
+    .attr('fill', d => catColor(d.book.category))
+    .attr('stroke', '#0f1117').attr('stroke-width', 1.5);
+
+  // Concept nodes: circle
+  node.filter(d => d.type === 'concept').append('circle')
+    .attr('r', d => d.r)
+    .attr('fill', d => {
+      const hue = (d.name.charCodeAt(0) * 137.5 + d.name.length * 50) % 360;
+      return `hsl(${hue}, 45%, 55%)`;
+    })
+    .attr('stroke', '#0f1117').attr('stroke-width', 1.5);
+
+  // Click: books open modal, concepts do nothing special
+  node.filter(d => d.type === 'book').on('click', (e,d) => openModal(d.book.file));
+
+  // Labels
+  // Book labels
+  node.filter(d => d.type === 'book').append('text')
+    .text(d => d.book.author.split('&')[0].trim().split(' ').pop() + ' ' + d.book.year)
+    .attr('font-size', '7px').attr('fill', '#b0b4c8').attr('font-weight', '500')
+    .attr('text-anchor', 'middle').attr('dy', d => d.r + 11);
+
+  // Concept labels
+  node.filter(d => d.type === 'concept').append('text')
+    .text(d => d.name)
+    .attr('font-size', '9px').attr('fill', '#e4e6ed').attr('font-weight', '600')
+    .attr('text-anchor', 'middle').attr('dy', d => d.r + 13);
+
+  // Tooltip
+  const tooltip = svg.append('g').style('display', 'none');
+  const ttRect = tooltip.append('rect').attr('fill', '#1a1d27').attr('stroke', '#2e3140').attr('rx', 6).attr('ry', 6);
+  const ttText = tooltip.append('text').attr('fill', '#e4e6ed').attr('font-size', '10px').attr('x', 8);
+
+  node.on('mouseenter', (e, d) => {
+    ttText.selectAll('tspan').remove();
+    if (d.type === 'book') {
+      ttText.append('tspan').attr('x', 8).attr('dy', 14).attr('font-weight', '600').text(d.book.title);
+      ttText.append('tspan').attr('x', 8).attr('dy', 13).attr('fill', '#8b8fa3').text(`${d.book.author} (${d.book.year})`);
+      if (d.conceptCount) ttText.append('tspan').attr('x', 8).attr('dy', 13).attr('fill', '#6c8cff').text(`${d.conceptCount} concepts`);
+    } else {
+      ttText.append('tspan').attr('x', 8).attr('dy', 14).attr('font-weight', '600').text(d.name);
+      ttText.append('tspan').attr('x', 8).attr('dy', 13).attr('fill', '#8b8fa3').text(`${d.bookCount} book${d.bookCount>1?'s':''}`);
+    }
+    const bbox = ttText.node().getBBox();
+    ttRect.attr('width', bbox.width + 16).attr('height', bbox.height + 10).attr('y', 2);
+    tooltip.style('display', null);
+  }).on('mousemove', (e) => {
+    const [mx, my] = d3.pointer(e, svg.node());
+    tooltip.attr('transform', `translate(${mx + 12},${my - 10})`);
+  }).on('mouseleave', () => tooltip.style('display', 'none'));
+
+  // Highlight on hover: dim unconnected nodes
+  node.on('mouseenter.highlight', (e, d) => {
+    const connected = new Set([d.id]);
+    links.forEach(l => {
+      const s = typeof l.source === 'object' ? l.source.id : l.source;
+      const t = typeof l.target === 'object' ? l.target.id : l.target;
+      if (s === d.id) connected.add(t);
+      if (t === d.id) connected.add(s);
+    });
+    node.style('opacity', n => connected.has(n.id) ? 1 : 0.15);
+    link.style('opacity', l => {
+      const s = typeof l.source === 'object' ? l.source.id : l.source;
+      const t = typeof l.target === 'object' ? l.target.id : l.target;
+      return (s === d.id || t === d.id) ? 1 : 0.05;
+    });
+  }).on('mouseleave.highlight', () => {
+    node.style('opacity', 1);
+    link.style('opacity', 1);
+  });
+
+  sim.on('tick', () => {
+    link.attr('x1', d=>d.source.x).attr('y1', d=>d.source.y)
+        .attr('x2', d=>d.target.x).attr('y2', d=>d.target.y);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+    tooltip.style('display', 'none');
+  });
+}
+
+// ── Reader ──
+let readerFile = null;
+let currentEpub = null;
+let currentRendition = null;
+
+function openReader(book, filePath) {
+  readerFile = book.file;
+  document.getElementById('readerTitle').textContent = `${book.title} — ${book.author} (${book.year})`;
+  document.getElementById('readerView').classList.add('open');
+
+  if (book.ext === 'epub') {
+    document.getElementById('readerFrame').style.display = 'none';
+    const container = document.getElementById('epubContainer');
+    container.style.display = 'block';
+    container.innerHTML = '<div id="epubArea"></div><div class="epub-nav"><button id="epubPrev">&#8592; Prev</button><button id="epubNext">Next &#8594;</button></div>';
+
+    const epubDarkCSS = `
+      *, *::before, *::after { color: #e4e6ed !important; border-color: #2e3140 !important; }
+      body, html { background: #0f1117 !important; font-family: -apple-system, sans-serif !important; line-height: 1.7 !important; max-width: 750px !important; margin: 0 auto !important; padding: 2rem 2.5rem !important; }
+      h1, h2, h3, h4, h5, h6 { color: #fff !important; }
+      a { color: #6c8cff !important; }
+      pre, code, samp, kbd { color: #a8d8a8 !important; background: #1a1d27 !important; border-radius: 4px; font-family: 'SF Mono', Menlo, monospace !important; font-size: 0.85em !important; }
+      pre { padding: 0.8rem !important; border: 1px solid #2e3140 !important; overflow-x: auto !important; }
+      .code-block { color: #a8d8a8 !important; background: #1a1d27 !important; border-radius: 6px; padding: 0.8rem !important; border: 1px solid #2e3140 !important; font-family: 'SF Mono', Menlo, monospace !important; font-size: 0.85em !important; white-space: pre-wrap; overflow-x: auto; margin: 0.5rem 0; }
+      img, svg { max-width: 100% !important; }
+      table { border-collapse: collapse !important; }
+      td, th { padding: 0.3rem 0.5rem !important; border: 1px solid #2e3140 !important; }
+      p { margin: 0.5em 0; }
+    `;
+
+    requestAnimationFrame(() => {
+      const area = document.getElementById('epubArea');
+      currentEpub = ePub();
+      fetch(encodeURI(filePath)).then(r => r.arrayBuffer()).then(buf => {
+        currentEpub.open(buf).then(() => {
+          currentRendition = currentEpub.renderTo(area, {
+            manager: 'continuous', flow: 'scrolled',
+            width: '100%', height: '100%'
+          });
+
+          currentRendition.hooks.content.register(contents => {
+            const doc = contents.document;
+            doc.querySelectorAll('style, link[rel="stylesheet"]').forEach(el => el.remove());
+            doc.querySelectorAll('[style]').forEach(el => el.removeAttribute('style'));
+            const s = doc.createElement('style');
+            s.textContent = epubDarkCSS;
+            doc.head.appendChild(s);
+            doc.querySelectorAll('p, div').forEach(el => {
+              const text = el.textContent;
+              const codePatterns = /^(import |from |pip |def |class |>>> |#!|\$ |pip3 )|[a-z_]+==\d|\.install\(|\.create\(|print\(|return |if __name__|except |try:|raise /m;
+              const hasMultipleLines = (el.querySelectorAll('br').length >= 2) || (text.split('\n').length >= 3);
+              if (hasMultipleLines && codePatterns.test(text)) el.classList.add('code-block');
+            });
+          });
+
+          currentRendition.display();
+          document.getElementById('epubPrev').addEventListener('click', () => currentRendition.prev());
+          document.getElementById('epubNext').addEventListener('click', () => currentRendition.next());
+          currentRendition.on('keyup', e => {
+            if (e.key === 'ArrowLeft') currentRendition.prev();
+            if (e.key === 'ArrowRight') currentRendition.next();
+          });
+        });
+      });
+    });
+  } else {
+    document.getElementById('epubContainer').style.display = 'none';
+    document.getElementById('readerFrame').style.display = '';
+    const pdfUrl = window.location.origin + '/' + encodeURI(filePath);
+    document.getElementById('readerFrame').src = '/.app/pdfjs/viewer.html?file=' + encodeURIComponent(pdfUrl);
+  }
+
+  renderPanel();
+}
+
+function navigateToPage(page) {
+  if (!page) return;
+  const p = parseInt(page);
+  if (!p) return;
+  const frame = document.getElementById('readerFrame');
+  if (frame.style.display !== 'none' && frame.contentWindow) {
+    frame.contentWindow.postMessage({ type: 'goToPage', page: p }, '*');
+  }
+}
+
+function renderPanel() {
+  if (!readerFile) return;
+  const bd = getBookData(readerFile);
+  const list = document.getElementById('panelConceptList');
+  list.innerHTML = '';
+  (bd.concepts||[]).forEach((c, ci) => {
+    const div = document.createElement('div');
+    div.className = 'panel-concept';
+
+    // Header: name + delete
+    const header = document.createElement('div');
+    header.className = 'panel-concept-top';
+    header.innerHTML = `
+      <span class="dot">&#9679;</span>
+      <div class="panel-concept-wrap">
+        <input class="panel-concept-name" value="${(c.name||'').replace(/"/g,'&quot;')}" placeholder="Concept...">
+        <div class="ac-list"></div>
+      </div>
+      <button class="panel-concept-del">&times;</button>`;
+    div.appendChild(header);
+
+    // Markers
+    const markerList = document.createElement('div');
+    markerList.className = 'panel-marker-list';
+    (c.markers||[]).forEach((m, mi) => {
+      const row = document.createElement('div');
+      row.className = 'panel-marker-item';
+
+      // Page input (always editable)
+      const pageInput = document.createElement('input');
+      pageInput.className = 'panel-marker-page-input';
+      pageInput.value = m.page || '';
+      pageInput.placeholder = 'p.';
+      pageInput.addEventListener('blur', () => savePanelConcepts());
+      pageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); navigateToPage(pageInput.value); }
+      });
+      row.appendChild(pageInput);
+
+      // Go button (visible when page has value)
+      const goBtn = document.createElement('button');
+      goBtn.className = 'panel-marker-page';
+      goBtn.textContent = '\u25B6';
+      goBtn.title = m.page ? 'Go to page ' + m.page : 'Enter a page number';
+      goBtn.style.display = m.page ? '' : 'none';
+      goBtn.addEventListener('click', () => {
+        navigateToPage(pageInput.value);
+        // If marker has highlights, flash them
+        if (m.highlights && m.highlights.length) {
+          const frame = document.getElementById('readerFrame');
+          if (frame.contentWindow) {
+            frame.contentWindow.postMessage({
+              type: 'highlightMarker', page: parseInt(m.highlights[0].page), text: m.highlights[0].text
+            }, '*');
+          }
+        }
+      });
+      row.appendChild(goBtn);
+
+      // Update go button visibility on input
+      pageInput.addEventListener('input', () => {
+        goBtn.style.display = pageInput.value.trim() ? '' : 'none';
+      });
+
+      const noteInput = document.createElement('input');
+      noteInput.className = 'panel-marker-note-input';
+      noteInput.value = m.note || '';
+      noteInput.placeholder = 'Idea or note...';
+      noteInput.addEventListener('blur', () => savePanelConcepts());
+      row.appendChild(noteInput);
+
+      const del = document.createElement('button');
+      del.className = 'panel-marker-del';
+      del.textContent = '\u00d7';
+      del.addEventListener('click', () => {
+        c.markers.splice(mi, 1);
+        libraryData[readerFile] = bd;
+        renderPanel();
+        savePanelAndFlash();
+      });
+      row.appendChild(del);
+      markerList.appendChild(row);
+    });
+
+    const addMarker = document.createElement('button');
+    addMarker.className = 'panel-marker-add';
+    addMarker.textContent = '+ marker';
+    addMarker.addEventListener('click', () => {
+      if (!c.markers) c.markers = [];
+      c.markers.push({ page: '', note: '' });
+      renderPanel();
+    });
+    markerList.appendChild(addMarker);
+    div.appendChild(markerList);
+    list.appendChild(div);
+
+    // Autocomplete
+    const nameInput = div.querySelector('.panel-concept-name');
+    const acList = div.querySelector('.ac-list');
+    nameInput.addEventListener('input', () => {
+      const val = nameInput.value.toLowerCase();
+      if (!val) { acList.classList.remove('open'); return; }
+      const all = getAllConcepts().map(([n]) => n).filter(n => n.includes(val) && n !== val);
+      if (!all.length) { acList.classList.remove('open'); return; }
+      acList.innerHTML = all.slice(0,6).map(n => `<div class="ac-item">${n}</div>`).join('');
+      acList.classList.add('open');
+      acList.querySelectorAll('.ac-item').forEach(el => el.addEventListener('mousedown', e => {
+        e.preventDefault(); nameInput.value = el.textContent; acList.classList.remove('open'); savePanelConcepts();
+      }));
+    });
+    nameInput.addEventListener('blur', () => { setTimeout(() => acList.classList.remove('open'), 150); savePanelConcepts(); });
+    div.querySelector('.panel-concept-del').addEventListener('click', () => {
+      bd.concepts.splice(ci, 1); libraryData[readerFile] = bd; renderPanel(); savePanelAndFlash();
+    });
+  });
+
+  renderPanelTags(bd.tags || []);
+}
+
+function savePanelConcepts() {
+  if (!readerFile) return;
+  const bd = getBookData(readerFile);
+  const items = document.querySelectorAll('#panelConceptList .panel-concept');
+  bd.concepts = [...items].map(el => {
+    const markers = [...el.querySelectorAll('.panel-marker-item')].map(row => ({
+      page: row.querySelector('.panel-marker-page-input').value.trim(),
+      note: row.querySelector('.panel-marker-note-input').value
+    }));
+    return { name: el.querySelector('.panel-concept-name').value.trim().toLowerCase(), markers };
+  }).filter(c => c.name || c.markers.some(m => m.note));
+  libraryData[readerFile] = bd;
+  savePanelAndFlash();
+}
+
+async function savePanelAndFlash() {
+  await saveData();
+  const el = document.getElementById('panelSaved');
+  el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 1500);
+}
+
+function renderPanelTags(tags) {
+  const wrap = document.getElementById('panelTagWrap');
+  const input = document.getElementById('panelTagInput');
+  wrap.querySelectorAll('.tag-item').forEach(el => el.remove());
+  tags.forEach(t => {
+    const span = document.createElement('span');
+    span.className = 'tag-item';
+    span.innerHTML = `${t} <span class="tag-x">&times;</span>`;
+    span.querySelector('.tag-x').addEventListener('click', () => {
+      const bd = getBookData(readerFile);
+      bd.tags = bd.tags.filter(x => x !== t); libraryData[readerFile] = bd;
+      renderPanelTags(bd.tags); savePanelAndFlash();
+    });
+    wrap.insertBefore(span, input);
+  });
+}
+
+document.getElementById('panelAddConcept').addEventListener('click', () => {
+  if (!readerFile) return;
+  const bd = getBookData(readerFile);
+  bd.concepts.push({ name: '', markers: [{ page: '', note: '' }] });
+  libraryData[readerFile] = bd; renderPanel();
+  const inputs = document.querySelectorAll('.panel-concept-name');
+  if (inputs.length) inputs[inputs.length-1].focus();
+});
+
+document.getElementById('panelTagInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const tag = e.target.value.trim().toLowerCase().replace(/[^a-z0-9\-]/g, '');
+    if (!tag || !readerFile) return;
+    const bd = getBookData(readerFile);
+    if (!bd.tags.includes(tag)) { bd.tags.push(tag); libraryData[readerFile] = bd; }
+    renderPanelTags(bd.tags); e.target.value = ''; savePanelAndFlash();
+  }
+});
+
+// Listen for messages from PDF viewer
+window.addEventListener('message', (e) => {
+  if (!e.data) return;
+  if (e.data.type === 'currentPage') {
+    document.getElementById('readerTogglePanel').textContent = 'Notes (p.' + e.data.page + ')';
+  }
+  if (e.data.type === 'requestHighlights' && readerFile) {
+    // Send stored highlights to viewer
+    const bd = getBookData(readerFile);
+    const allHl = [];
+    (bd.concepts||[]).forEach(c => {
+      (c.markers||[]).forEach(m => {
+        (m.highlights||[]).forEach(h => allHl.push(h));
+      });
+    });
+    const frame = document.getElementById('readerFrame');
+    if (frame.contentWindow) frame.contentWindow.postMessage({ type: 'loadHighlights', highlights: allHl }, '*');
+  }
+  if (e.data.type === 'newHighlight' && readerFile) {
+    // Add highlight as a new marker in the most recent concept, or create one
+    const bd = getBookData(readerFile);
+    if (!bd.concepts.length) {
+      bd.concepts.push({ name: '', markers: [] });
+    }
+    // Find concept that has a marker on this page, or use last concept
+    let targetConcept = bd.concepts.find(c => (c.markers||[]).some(m => m.page == e.data.page));
+    if (!targetConcept) targetConcept = bd.concepts[bd.concepts.length - 1];
+    if (!targetConcept.markers) targetConcept.markers = [];
+
+    // Add as new marker with highlight
+    targetConcept.markers.push({
+      page: String(e.data.page),
+      note: e.data.text,
+      highlights: [{ page: e.data.page, text: e.data.text, rects: e.data.rects }]
+    });
+    libraryData[readerFile] = bd;
+    saveData();
+    renderPanel();
+    savePanelAndFlash();
+  }
+  if (e.data.type === 'allHighlights' && readerFile) {
+    // Sync all highlights back to data
+    // Already handled per-highlight in newHighlight
+  }
+});
+
+document.getElementById('readerTogglePanel').addEventListener('click', () => {
+  const panel = document.getElementById('notesPanel');
+  const btn = document.getElementById('readerTogglePanel');
+  panel.classList.toggle('hidden');
+  btn.classList.toggle('active');
+});
+
+function closeReader() {
+  document.getElementById('readerView').classList.remove('open');
+  document.getElementById('readerFrame').src = '';
+  if (currentEpub) { currentEpub.destroy(); currentEpub = null; currentRendition = null; }
+  document.getElementById('epubContainer').innerHTML = '';
+  readerFile = null;
+  render();
+}
+
+document.getElementById('readerBack').addEventListener('click', closeReader);
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('readerView').classList.contains('open')) { closeReader(); }
+    else if (document.getElementById('modalOverlay').classList.contains('open')) {
+      document.getElementById('modalOverlay').classList.remove('open');
+    }
+  }
+});
+
+// ── View toggle ──
+const VIEW_CYCLE = ['cards', 'graph', 'notes'];
+const VIEW_LABELS = { cards: 'Graph', graph: 'Notes', notes: 'Cards' };
+document.getElementById('viewBtn').addEventListener('click', () => {
+  const btn = document.getElementById('viewBtn');
+  const idx = VIEW_CYCLE.indexOf(viewMode);
+  viewMode = VIEW_CYCLE[(idx + 1) % VIEW_CYCLE.length];
+  btn.textContent = VIEW_LABELS[viewMode];
+  btn.classList.toggle('active', viewMode !== 'cards');
+  render();
+});
+
+// ── Sort toggle ──
+document.getElementById('sortBtn').addEventListener('click', () => {
+  const btn = document.getElementById('sortBtn');
+  if (currentSort==='year'&&!sortAsc){sortAsc=true;btn.textContent='Year \u2191';}
+  else if(currentSort==='year'&&sortAsc){currentSort='title';sortAsc=false;btn.textContent='Title \u2193';}
+  else if(currentSort==='title'&&!sortAsc){sortAsc=true;btn.textContent='Title \u2191';}
+  else if(currentSort==='title'&&sortAsc){currentSort='author';sortAsc=false;btn.textContent='Author \u2193';}
+  else if(currentSort==='author'&&!sortAsc){sortAsc=true;btn.textContent='Author \u2191';}
+  else{currentSort='year';sortAsc=false;btn.textContent='Year \u2193';}
+  render();
+});
+
+// ── Init ──
+document.getElementById('search').addEventListener('input', render);
+document.getElementById('categoryFilter').addEventListener('change', render);
+document.getElementById('yearFilter').addEventListener('change', render);
+document.getElementById('formatFilter').addEventListener('change', render);
+
+// Init: load catalog from server, then data, then render
+loadCatalog().then(() => {
+  populateFilters();
+  loadData().then(render);
+});
+</script>
+</body>
+</html>
