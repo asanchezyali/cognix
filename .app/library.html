@@ -265,6 +265,25 @@
   }
   .modal-saved.show { opacity: 1; }
 
+  /* Graph note popup */
+  #graphPopup {
+    display: none; position: fixed; z-index: 50;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.85rem 1rem; max-width: 340px; min-width: 200px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+  #graphPopup.open { display: block; }
+  .gp-close {
+    position: absolute; top: 6px; right: 8px; background: none; border: none;
+    color: var(--text2); font-size: 1rem; cursor: pointer;
+  }
+  .gp-close:hover { color: var(--text); }
+  .gp-page { font-size: 0.65rem; color: var(--accent); font-weight: 600; margin-bottom: 0.2rem; }
+  .gp-note { font-size: 0.8rem; color: var(--text); line-height: 1.45; margin-bottom: 0.3rem; }
+  .gp-hl { font-size: 0.75rem; color: var(--tag-text); font-style: italic; border-left: 2px solid rgba(255,220,50,0.4); padding-left: 0.5rem; margin-bottom: 0.3rem; }
+  .gp-book { font-size: 0.7rem; color: var(--accent); opacity: 0.7; cursor: pointer; }
+  .gp-book:hover { opacity: 1; }
+
   /* Notes view */
   #notesView {
     max-width: 1400px; margin: 0 auto; padding: 0 2rem 3rem; display: none;
@@ -487,6 +506,7 @@
 <div class="grid" id="grid"></div>
 
 <div id="graphContainer"><svg id="graphSvg"></svg></div>
+<div id="graphPopup"><button class="gp-close" id="gpClose">&times;</button><div id="gpContent"></div></div>
 
 <div id="notesView">
   <input type="text" class="notes-search" id="notesSearch" placeholder="Search concepts, notes, highlights...">
@@ -1108,13 +1128,28 @@ function renderGraph(filtered) {
   const bookNodes = [];
   const links = [];
 
+  // Collect markers as "pelitos" (satellite nodes)
+  const markerNodes = [];
+  const markerLinks = [];
+
   filtered.forEach(b => {
     const bd = getBookData(b.file);
     const cnames = (bd.concepts||[]).map(c => c.name).filter(Boolean);
     bookNodes.push({ id: 'book:' + b.file, type: 'book', book: b, r: 10, conceptCount: cnames.length });
-    cnames.forEach(c => {
-      conceptSet.add(c);
-      links.push({ source: 'book:' + b.file, target: 'concept:' + c });
+    (bd.concepts||[]).forEach(c => {
+      if (!c.name) return;
+      conceptSet.add(c.name);
+      links.push({ source: 'book:' + b.file, target: 'concept:' + c.name });
+      // Create pelitos for each marker
+      (c.markers||[]).forEach((m, mi) => {
+        if (!m.note && !m.page) return;
+        const mid = `marker:${b.file}:${c.name}:${mi}`;
+        markerNodes.push({
+          id: mid, type: 'marker', r: 3,
+          marker: m, conceptName: c.name, book: b
+        });
+        markerLinks.push({ source: 'concept:' + c.name, target: mid });
+      });
     });
   });
 
@@ -1123,7 +1158,8 @@ function renderGraph(filtered) {
     return { id: 'concept:' + name, type: 'concept', name, r: 6 + count * 3, bookCount: count };
   });
 
-  const allNodes = [...bookNodes, ...conceptNodes];
+  const allNodes = [...bookNodes, ...conceptNodes, ...markerNodes];
+  const allLinks = [...links, ...markerLinks];
 
   if (!conceptNodes.length) {
     svg.append('text').text('Add concepts to books to see the knowledge graph')
@@ -1133,20 +1169,30 @@ function renderGraph(filtered) {
   }
 
   const sim = d3.forceSimulation(allNodes)
-    .force('link', d3.forceLink(links).id(d => d.id).distance(80))
-    .force('charge', d3.forceManyBody().strength(d => d.type === 'book' ? -250 : -150))
+    .force('link', d3.forceLink(allLinks).id(d => d.id).distance(d => {
+      const t = typeof d.target === 'object' ? d.target : allNodes.find(n => n.id === d.target);
+      return (t && t.type === 'marker') ? 25 : 80;
+    }))
+    .force('charge', d3.forceManyBody().strength(d => d.type === 'marker' ? -20 : d.type === 'book' ? -250 : -150))
     .force('center', d3.forceCenter(width/2, height/2))
-    .force('collision', d3.forceCollide().radius(d => d.r + 6));
+    .force('collision', d3.forceCollide().radius(d => d.r + (d.type === 'marker' ? 2 : 6)));
 
   const g = svg.append('g');
   svg.call(d3.zoom().scaleExtent([0.15, 5]).on('zoom', e => g.attr('transform', e.transform)));
 
   // Links
-  const link = g.append('g').selectAll('line').data(links).join('line')
-    .attr('stroke', '#2e3140').attr('stroke-width', 1);
+  const link = g.append('g').selectAll('line').data(allLinks).join('line')
+    .attr('stroke', d => {
+      const t = typeof d.target === 'object' ? d.target : null;
+      return (t && t.type === 'marker') ? '#3a3f55' : '#2e3140';
+    })
+    .attr('stroke-width', d => {
+      const t = typeof d.target === 'object' ? d.target : null;
+      return (t && t.type === 'marker') ? 0.5 : 1;
+    });
 
-  // Nodes
-  const node = g.append('g').selectAll('g').data(allNodes).join('g')
+  // Main nodes (books + concepts)
+  const node = g.append('g').selectAll('g').data(allNodes.filter(d => d.type !== 'marker')).join('g')
     .style('cursor', 'pointer')
     .call(d3.drag()
       .on('start', (e,d) => { if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
@@ -1170,23 +1216,67 @@ function renderGraph(filtered) {
     })
     .attr('stroke', '#0f1117').attr('stroke-width', 1.5);
 
-  // Click: books open modal, concepts do nothing special
-  node.filter(d => d.type === 'book').on('click', (e,d) => openModal(d.book.file));
+  // Marker nodes (pelitos): small dots
+  const pelito = g.append('g').selectAll('circle').data(markerNodes).join('circle')
+    .attr('r', d => d.r)
+    .attr('fill', d => d.marker.page ? '#ffd832' : '#8b8fa3')
+    .attr('stroke', '#0f1117').attr('stroke-width', 0.5)
+    .style('cursor', 'pointer');
+
+  // Click pelito → show popup
+  const popup = document.getElementById('graphPopup');
+  const gpContent = document.getElementById('gpContent');
+
+  pelito.on('click', (e, d) => {
+    e.stopPropagation();
+    const m = d.marker;
+    let html = '';
+    if (m.page) html += `<div class="gp-page" style="cursor:pointer" id="gpGoPage">p. ${m.page} &middot; ${d.conceptName}</div>`;
+    else html += `<div class="gp-page">${d.conceptName}</div>`;
+    if (m.note) html += `<div class="gp-note">${m.note}</div>`;
+    (m.highlights||[]).forEach(h => {
+      html += `<div class="gp-hl">"${h.text}"</div>`;
+    });
+    html += `<div class="gp-book" data-file="${d.book.file}">${d.book.title} — ${d.book.author} (${d.book.year})</div>`;
+    gpContent.innerHTML = html;
+    popup.style.left = e.clientX + 12 + 'px';
+    popup.style.top = e.clientY - 10 + 'px';
+    popup.classList.add('open');
+    // Wire page link → open book at that page
+    const goPage = document.getElementById('gpGoPage');
+    if (goPage) {
+      goPage.addEventListener('click', () => {
+        popup.classList.remove('open');
+        const filePath = `${d.book.path}/${d.book.file}`;
+        openReader(d.book, filePath);
+        setTimeout(() => navigateToPage(m.page), 1000);
+      });
+    }
+    // Wire book link
+    gpContent.querySelector('.gp-book').addEventListener('click', () => {
+      popup.classList.remove('open');
+      openModal(d.book.file);
+    });
+  });
+
+  document.getElementById('gpClose').addEventListener('click', () => popup.classList.remove('open'));
+  svg.on('click', () => popup.classList.remove('open'));
+
+  // Click: books open modal
+  node.filter(d => d.type === 'book').on('click', (e,d) => { popup.classList.remove('open'); openModal(d.book.file); });
 
   // Labels
-  // Book labels
   node.filter(d => d.type === 'book').append('text')
     .text(d => d.book.author.split('&')[0].trim().split(' ').pop() + ' ' + d.book.year)
     .attr('font-size', '7px').attr('fill', '#b0b4c8').attr('font-weight', '500')
     .attr('text-anchor', 'middle').attr('dy', d => d.r + 11);
 
-  // Concept labels
   node.filter(d => d.type === 'concept').append('text')
     .text(d => d.name)
     .attr('font-size', '9px').attr('fill', '#e4e6ed').attr('font-weight', '600')
     .attr('text-anchor', 'middle').attr('dy', d => d.r + 13);
 
-  // Tooltip
+  // Tooltip (for main nodes)
   const tooltip = svg.append('g').style('display', 'none');
   const ttRect = tooltip.append('rect').attr('fill', '#1a1d27').attr('stroke', '#2e3140').attr('rx', 6).attr('ry', 6);
   const ttText = tooltip.append('text').attr('fill', '#e4e6ed').attr('font-size', '10px').attr('x', 8);
@@ -1209,23 +1299,39 @@ function renderGraph(filtered) {
     tooltip.attr('transform', `translate(${mx + 12},${my - 10})`);
   }).on('mouseleave', () => tooltip.style('display', 'none'));
 
-  // Highlight on hover: dim unconnected nodes
+  // Pelito tooltip on hover
+  pelito.on('mouseenter', (e, d) => {
+    ttText.selectAll('tspan').remove();
+    ttText.append('tspan').attr('x', 8).attr('dy', 14).attr('fill', '#ffd832').text(d.marker.page ? `p.${d.marker.page}` : 'note');
+    const preview = (d.marker.note || '').substring(0, 60) + ((d.marker.note||'').length > 60 ? '...' : '');
+    if (preview) ttText.append('tspan').attr('x', 8).attr('dy', 12).attr('fill', '#8b8fa3').text(preview);
+    const bbox = ttText.node().getBBox();
+    ttRect.attr('width', bbox.width + 16).attr('height', bbox.height + 10).attr('y', 2);
+    tooltip.style('display', null);
+  }).on('mousemove', (e) => {
+    const [mx, my] = d3.pointer(e, svg.node());
+    tooltip.attr('transform', `translate(${mx + 12},${my - 10})`);
+  }).on('mouseleave', () => tooltip.style('display', 'none'));
+
+  // Highlight on hover: dim unconnected
   node.on('mouseenter.highlight', (e, d) => {
     const connected = new Set([d.id]);
-    links.forEach(l => {
+    allLinks.forEach(l => {
       const s = typeof l.source === 'object' ? l.source.id : l.source;
       const t = typeof l.target === 'object' ? l.target.id : l.target;
       if (s === d.id) connected.add(t);
       if (t === d.id) connected.add(s);
     });
     node.style('opacity', n => connected.has(n.id) ? 1 : 0.15);
+    pelito.style('opacity', p => connected.has(p.id) ? 1 : 0.08);
     link.style('opacity', l => {
       const s = typeof l.source === 'object' ? l.source.id : l.source;
       const t = typeof l.target === 'object' ? l.target.id : l.target;
-      return (s === d.id || t === d.id) ? 1 : 0.05;
+      return connected.has(s) && connected.has(t) ? 1 : 0.05;
     });
   }).on('mouseleave.highlight', () => {
     node.style('opacity', 1);
+    pelito.style('opacity', 1);
     link.style('opacity', 1);
   });
 
@@ -1233,6 +1339,7 @@ function renderGraph(filtered) {
     link.attr('x1', d=>d.source.x).attr('y1', d=>d.source.y)
         .attr('x2', d=>d.target.x).attr('y2', d=>d.target.y);
     node.attr('transform', d => `translate(${d.x},${d.y})`);
+    pelito.attr('cx', d => d.x).attr('cy', d => d.y);
     tooltip.style('display', 'none');
   });
 }
