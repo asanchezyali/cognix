@@ -1,12 +1,12 @@
-# Plan: Sync + Collaborative Spaces for Cognito
+# Plan: Sync + Collaborative Spaces for Cognix
 
 ## Context
 
-Cognito is currently a local-only app: one user, one machine. The goal is to enable:
+Cognix is currently a local-only app: one user, one machine. The goal is to enable:
 1. **Sync**: the same user accesses their library, annotations, and knowledge graph from multiple devices
 2. **Collaborative spaces**: multiple users share a library, see each other's annotations, build a shared knowledge graph
 
-This is the step that takes Cognito from a personal tool to a platform.
+This is the step that takes Cognix from a personal tool to a platform.
 
 ## Architecture Decision: Supabase
 
@@ -355,7 +355,7 @@ UI: small avatars in the header showing who's online. If someone is reading the 
 
 "Share this concept" → generates a public URL:
 ```
-https://cognito.app/shared/concept/{uuid}
+https://cognix.app/shared/concept/{uuid}
 ```
 Shows the concept with all its markers across books (read-only). No auth needed. Good for sharing on Twitter, blogs, etc.
 
@@ -379,7 +379,7 @@ Shows the concept with all its markers across books (read-only). No auth needed.
 **Step 5.2: Project structure**
 
 ```
-cognito/
+cognix/
   src-tauri/
     src/main.rs          # Tauri app + merged with current server logic
     Cargo.toml

@@ -1,4 +1,4 @@
-# Cognito
+# Cognix
 
 A local-first personal library browser with a concept-based knowledge graph. Read, annotate, and connect ideas across your PDFs and EPUBs.
 
@@ -12,7 +12,7 @@ A local-first personal library browser with a concept-based knowledge graph. Rea
 
 ## The knowledge graph
 
-Cognito builds a bipartite graph of your reading:
+Cognix builds a bipartite graph of your reading:
 
 - **Squares** = books (colored by category)
 - **Circles** = concepts you defined (e.g., "reinforcement-learning", "metric-space")
