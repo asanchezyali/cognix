@@ -53,8 +53,8 @@ Hover to highlight connections. Click a marker dot to see the full note and jump
 ### Install
 
 ```bash
-git clone https://github.com/asanchezyali/cognito.git
-cd cognito
+git clone https://github.com/asanchezyali/cognix.git
+cd cognix
 
 # Build the server
 cd .app/server && cargo build --release && cd ../..
